@@ -55,3 +55,16 @@
 > 解法：装 Claude GitHub App（`/install-github-app`，接 `anthropics/claude-code-action@v1`），
 > PR 署 `claude[bot]`，人来 approve。**代价**：活儿从本地会话搬到 GitHub Actions（`@claude` 触发）。
 > 要让本地会话也能开 bot 署名的 PR，只有第二个 GitHub 账号 + 它自己的 PAT 这一条路。
+
+> ## 🔓 审批与身份：改走 admin bypass（2026-09-05）
+> **决定**：人给自己在 ruleset 里加了 `RepositoryRole(always)` 的 bypass，`current_user_can_bypass=always`。
+> 于是「PR 必须由非本人发起才能 approve」这个约束不再需要绕——**单人仓，直接放行**。
+>
+> 随之移除的：`.github/workflows/claude.yml` 与 `claude-code-review.yml`（PR #2，**从未进入 main**，已关闭并删分支）。
+> 记一笔它们当时的状态，省得以后重装再踩一遍：**生成出来是只读的**
+> （`contents: read` / `pull-requests: read`），`claude-code-review` 在 PR #2 上跑过一轮 SUCCESS 但一个字没发——
+> 要它能推分支、开 PR、发评论，必须改成 `contents: write` / `pull-requests: write` / `issues: write`。
+> 仓库 secret `CLAUDE_CODE_OAUTH_TOKEN` **还留着**（workflow 没了，它现在没人用）。
+>
+> **闸门现状**：`main` 仍要求 PR + 1 approval + `gate` 绿，但**你可以 bypass**。
+> 也就是说闸门对 AI 有效、对你无效——这是有意的，不是漏配。

@@ -68,3 +68,20 @@
 >
 > **闸门现状**：`main` 仍要求 PR + 1 approval + `gate` 绿，但**你可以 bypass**。
 > 也就是说闸门对 AI 有效、对你无效——这是有意的，不是漏配。
+
+> ## 🧪 exp001：rg 基准线实测，推翻了意向书里的一条（2026-09-05）
+> 装齐 `ripgrep 15.2.0`（`cargo install`）与 `gitleaks 8.30.1`（官方 release + 核 checksum）。
+> gitleaks 扫工作区与全部 6 个提交：**no leaks found**。
+>
+> `docs/experiments/exp001-rg-baseline-cjk/` 拿真 rg 跑了四类中文查询，结论：
+> **簡繁不互查 ✅ 坐实 · 全半角不归一 ✅ 坐实 · 「詞在句中」❌ 假设被推翻**——
+> rg 做子串匹配、根本不分词，句中命中毫无问题。
+> **这一条要回写进 `.42cog/intent.md`**：切分是 42find 用索引后自己给自己挖的坑，
+> 不是相对 rg 的优势点；真正能赢的是字符层面的归一。
+>
+> ⚠️ 坑：Claude Code 注入了一个同名 `rg` shell 函数（转给内置的 14.1.1），
+> 交互式敲有输出、脚本里查不到。**测基准必须走 `~/.cargo/bin/rg`。**
+> `scripts/check-tools.sh` 的 PATH 补丁已前移到所有 check 之前（先前只覆盖了「本系统专属」那一段）。
+> 安装提示也改成本项目真实走的路子（rg / hyperfine → `cargo install`，gitleaks → 官方 release）。
+>
+> **现在只缺**：`hyperfine`（延迟那个数）与 `opencode`（换谱系评审，下一步要用）。

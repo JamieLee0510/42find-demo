@@ -35,3 +35,10 @@
 > `cargo fmt --all -- --check` ✓ ｜ `cargo clippy --workspace --all-targets` ✓（`workspace.lints.clippy.all = deny`）｜
 > `cargo test --workspace` ✓（0 个测试——作品还没开始，闸门先立着）。
 > `target/` 已加进 `.gitignore`；**`Cargo.lock` 入库**（出二进制的项目，锁文件是版本锁定的另一半）。
+
+> ## 🔧 gh 装法（2026-09-05 · 不走 brew）
+> 官方 release 二进制 → `~/.local/bin/gh`（该路径已在 PATH 里，无需 sudo）：
+> `gh 2.100.0`，下载后核过官方 `checksums.txt`，SHA256 一致；man page 进 `~/.local/share/man/man1/`。
+> **升级就是重跑同样三步**（下载新 tag → 核校验和 → 覆盖 `~/.local/bin/gh`）。
+> ⚠️ `scripts/check-tools.sh` 里 gh 的安装提示仍写着 `brew install gh`——那是通用底座段的默认写法，本机没按它走。
+> **还没登录**：`gh auth login` 是交互式的，要人自己跑。

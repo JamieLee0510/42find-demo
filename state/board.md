@@ -5,15 +5,19 @@
 > 每完成一个可命名的逻辑单元存一次；破坏性操作之前也存一次。这是给你自己留的后路，不是给别人看的历史。
 
 > ## ⛳ 待办（2026-09-05 · 初始化留下的欠账）
-> 1. **远程仓库还没配**——你说有地址，把它发我：`git remote add origin <地址>`。
->    `_build/ _tmp/ _archive/` 与所有忽略件**没有远端副本，本地一丢就没了**，这一步不能一直欠着。
->    另：CI 现在按 GitHub Actions 起草（`.github/workflows/ci.yml`）；如果远端不是 GitHub（例如 CNB），换成 `.cnb.yml`。
-> 2. **Rust 工具链本机未安装**——`rustup / rustc / cargo` 全缺，`cargo fmt`、`cargo clippy` 同缺。
->    装：`brew install rustup && rustup-init`。装完跑 `bash scripts/check-tools.sh` 复验。
-> 3. **`rust-toolchain.toml` 里的 `1.89.0` 是已知可用的下限，不是实测值**（初始化时本机没有 rustup）。
->    装好后 `rustc --version`，把它换成实测版本。
-> 4. **包名 ≠ 目录名**：目录 `src/42find-cli`，包名 `find42-cli`（cargo 限制包名不以数字开头），命令名仍是 `42find`。
->    装好 cargo 后 `cargo metadata` 验一眼；若该限制不成立，可把包名改回 `42find-cli`。
+> 1. ~~远程仓库~~ **已配**：`origin` → https://github.com/JamieLee0510/42find-demo（2026-09-05）。
+>    CI 平台确认为 GitHub → `.github/workflows/ci.yml` 是对的，不用换 `.cnb.yml`。
+>    **已推**：`main` → `origin/main`。⚠️ 远程走 **SSH**（`git@github.com:...`）——HTTPS 本机没凭据（没装 `gh`，keychain 里也没有），
+>    换台机器或换用 HTTPS 时会卡在 `could not read Username`。
+> 2. ~~Rust 工具链未安装~~ **已解决**：其实早就装了，只是 `~/.cargo/bin` 不在非登录 shell 的 PATH 里，
+>    `command -v` 全查不到 → `check-tools.sh` 把装好的报成「一个都没装」。**误报比不检查更糟**。
+>    已在 `scripts/check-tools.sh` 里分三态处理（在 PATH / 装了但不在 PATH / 真没装）。
+>    要长期生效，在你的 shell 配置里加：`source "$HOME/.cargo/env"`。
+> 3. ~~版本号是猜的~~ **已实测**：`rustc 1.89.0` / `cargo 1.89.0` / `rustfmt 1.8.0` / `clippy 0.1.89`，
+>    与 `rust-toolchain.toml` 钉的 `1.89.0` 一致，`rustup show` 确认版本由该文件接管。**锁生效**。
+> 4. ~~包名 ≠ 目录名待验~~ **已验，必须如此**：`cargo check` 直接报
+>    `invalid character \`4\` in package name: the name cannot start with a digit`。
+>    所以包名只能是 `find42-cli` / `find42-core`；目录名 `src/42find-*` 与命令名 `42find` 不受影响。
 > 5. 其余缺件（`rg` / `gh` / `gitleaks` / `opencode`）见 `bash scripts/check-tools.sh`。
 >    **`opencode` 关系到下一步**：对抗性评审要换谱系，缺了就少一双不同来路的眼睛。
 
@@ -26,3 +30,8 @@
 > `scripts/check-tools.sh` 专属段已按 Rust workspace 填好（`STACK_EMPTY=0`）｜ 版本锁定 `rust-toolchain.toml` ｜
 > 目录语义走生态原生位置：根 `Cargo.toml` 的 workspace（**不另造配置文件**）｜ 最小 CI `.github/workflows/ci.yml`：
 > `cargo fmt --check` + `cargo clippy` + `cargo test` ｜ 编排清单写进 `skills/README.md`（不新开文件）。
+
+> ## ✅ 三道闸门本地全绿（2026-09-05）
+> `cargo fmt --all -- --check` ✓ ｜ `cargo clippy --workspace --all-targets` ✓（`workspace.lints.clippy.all = deny`）｜
+> `cargo test --workspace` ✓（0 个测试——作品还没开始，闸门先立着）。
+> `target/` 已加进 `.gitignore`；**`Cargo.lock` 入库**（出二进制的项目，锁文件是版本锁定的另一半）。

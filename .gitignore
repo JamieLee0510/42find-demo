@@ -33,3 +33,7 @@ __pycache__/
 *.pyc
 node_modules/
 .venv/
+
+# Rust 构建产物（属于第六组「过程材料」：扔的，不入库）
+# ⚠️ Cargo.lock **要入库**——这是一个出二进制的项目，锁文件是「装的是不是同一个版本」的另一半。
+target/

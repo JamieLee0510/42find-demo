@@ -99,6 +99,19 @@ echo "  **一个都没有也能干活，但你就少了一双不同来路的眼�
 STACK_EMPTY=0   # 已按本系统技术栈（Rust workspace）填入，见下
 echo
 echo "▸ 本系统专属（Rust workspace：src/42find-cli 入口 · src/42find-core 能力）"
+
+# rustup 把 shim 装在 ~/.cargo/bin，而这条 PATH 只有**登录 shell** 才会
+# 从 ~/.cargo/env 里读进来。脚本、CI、AI 起的非登录 shell 都看不到它——
+# 于是 command -v 会把「装好了的工具链」报成「一个都没装」。
+# **误报比不检查更糟**：它会让人去重装一遍已经装好的东西。
+# 所以这里分三态：在 PATH 里 / 装了但不在 PATH / 真没装。
+# （2026-09-05：本机就是第二种，第一次跑全报缺。）
+if ! have rustup && [ -x "$HOME/.cargo/bin/rustup" ]; then
+  echo "  ⚠️ ~/.cargo/bin 不在当前 PATH 里——工具链其实装了，只是这个 shell 看不见。"
+  echo "     本次检查临时加上它；要长期生效，在 shell 配置里加：source \"\$HOME/.cargo/env\""
+  PATH="$HOME/.cargo/bin:$PATH"
+fi
+
 check rustup "Rust 工具链管理器。版本锁定靠它读 rust-toolchain.toml" \
   'brew install rustup && rustup-init' '见 rustup.rs' '见 rustup.rs'
 check rustc  "Rust 编译器" 'rustup 装，见 rustup.rs' '同左' '同左'

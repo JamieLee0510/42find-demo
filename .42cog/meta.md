@@ -31,7 +31,8 @@
 - **作品区**：`src/` —— 装 `42find` 这个命令行工具的两个 crate：
   - `src/42find-cli` —— **入口**：命令行界面（参数、输出、退出码）
   - `src/42find-core` —— **能力**：功能逻辑（索引、分词、查询、排序）
-- **远程仓库**：待配（见 `state/board.md`）
+- **远程仓库**：`git@github.com:JamieLee0510/42find-demo.git`（走 SSH——HTTPS 那条路本机没凭据）
+- **默认分支**：`main`
 - **与默认六组的差异**：无
 
 ## 交接

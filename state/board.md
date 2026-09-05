@@ -35,3 +35,23 @@
 > `cargo fmt --all -- --check` ✓ ｜ `cargo clippy --workspace --all-targets` ✓（`workspace.lints.clippy.all = deny`）｜
 > `cargo test --workspace` ✓（0 个测试——作品还没开始，闸门先立着）。
 > `target/` 已加进 `.gitignore`；**`Cargo.lock` 入库**（出二进制的项目，锁文件是版本锁定的另一半）。
+
+> ## 🔧 gh 装法（2026-09-05 · 不走 brew）
+> 官方 release 二进制 → `~/.local/bin/gh`（该路径已在 PATH 里，无需 sudo）：
+> `gh 2.100.0`，下载后核过官方 `checksums.txt`，SHA256 一致；man page 进 `~/.local/share/man/man1/`。
+> **升级就是重跑同样三步**（下载新 tag → 核校验和 → 覆盖 `~/.local/bin/gh`）。
+> ⚠️ `scripts/check-tools.sh` 里 gh 的安装提示仍写着 `brew install gh`——那是通用底座段的默认写法，本机没按它走。
+> **还没登录**：`gh auth login` 是交互式的，要人自己跑。
+
+> ## 🔒 main 的闸门补齐（2026-09-05）
+> ruleset `main branch protection`（id 22319680）原本只有 `deletion` / `non_fast_forward` / `pull_request(approvals=1)`——
+> **没有 required_status_checks，意思是 CI 红着也能合**。前面五次全绿是巧合不是保证。
+> 已补：`required_status_checks → gate`（GitHub Actions app id 15368），`strict=false`
+> （不强制分支先跟上 main；单人仓开 true 会天天 rebase，收益不抵摩擦）。
+>
+> **⚠️ 仍未解决：PR 的发起身份。** `gh` 用的是本人 token，本地会话开的 PR 必然署 `JamieLee0510`，
+> 而 GitHub **禁止 self-approve**（产品层面，没有开关），`bypass_actors` 也是空的 →
+> **本地开的 PR 现在合不掉**（PR #1 状态：`MERGEABLE` 但 `BLOCKED` / `REVIEW_REQUIRED`）。
+> 解法：装 Claude GitHub App（`/install-github-app`，接 `anthropics/claude-code-action@v1`），
+> PR 署 `claude[bot]`，人来 approve。**代价**：活儿从本地会话搬到 GitHub Actions（`@claude` 触发）。
+> 要让本地会话也能开 bot 署名的 PR，只有第二个 GitHub 账号 + 它自己的 PAT 这一条路。

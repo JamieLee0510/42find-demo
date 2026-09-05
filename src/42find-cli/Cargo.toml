@@ -1,0 +1,16 @@
+# 入口层：参数解析、输出格式、退出码。**不放检索逻辑**（见 .42cog/cog.md）。
+[package]
+name    = "find42-cli"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "42find"          # 用户实际敲的那个命令
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+find42-core = { path = "../42find-core" }

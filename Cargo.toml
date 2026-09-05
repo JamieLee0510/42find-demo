@@ -1,0 +1,18 @@
+# 目录语义的机器可读版本。**不另造配置文件**——Rust 生态里这件事就归这儿。
+#
+# ⚠️ 包名不叫 42find-cli：cargo 对以数字开头的包名有限制，所以包名用 find42-*，
+#    目录名与命令名都保持 42find。命令名由 [[bin]] name 决定，见 src/42find-cli/Cargo.toml。
+[workspace]
+resolver = "3"
+members  = [
+  "src/42find-cli",   # 入口：命令行界面
+  "src/42find-core",  # 能力：功能逻辑
+]
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+
+[workspace.lints.clippy]
+# CI 闸门第二条要真的有牙齿：警告即失败。
+all = { level = "deny", priority = -1 }

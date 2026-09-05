@@ -1,0 +1,15 @@
+# 能力层：索引、分词、查询、排序。**不认识命令行**——依赖是单向的（见 .42cog/cog.md）。
+[package]
+name    = "find42-core"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "find42_core"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]

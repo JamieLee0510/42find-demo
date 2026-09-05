@@ -1,0 +1,7 @@
+# 装上了还要锁住——只装不锁，换台机器就构建不了。
+# ⚠️ 这个版本号是「已知可用的下限」，不是本机实测值：初始化时本机还没装 rustup。
+#    装好后跑 `rustc --version`，把下面这行换成实测的那个版本。（见 state/board.md）
+[toolchain]
+channel    = "1.89.0"
+components = ["rustfmt", "clippy"]   # CI 两道闸门用的就是这两个
+profile    = "minimal"

@@ -1,0 +1,18 @@
+# 先有闸门，再有检查——检查随项目长，闸门第 0 天就要在。
+# 内容就是初始化第三步已确定的技术栈，不多不少。
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 版本不在这里写死——rustup 读根目录的 rust-toolchain.toml，唯一编码。
+      - run: rustup show
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets
+      - run: cargo test --workspace

@@ -1,0 +1,20 @@
+# 黄金查询集 — 「这个词该搜出这几处」的固定答案
+# 每行：查询<TAB>期望命中（文件:行:字节列，逗号分隔，无命中写 -）<TAB>说明
+# 列是 **1-based 字节列**，与 rg --column 同单位——否则跟基线对不上，召回率就是假的。
+# corpus-sum: 54efebe5ada6
+
+检索	01-simplified.txt:2:16,02-traditional.txt:2:16,06-inline.txt:1:13,06-inline.txt:1:31,06-inline.txt:2:16	簡繁互查：简体查繁体
+檢索	01-simplified.txt:2:16,02-traditional.txt:2:16,06-inline.txt:1:13,06-inline.txt:1:31,06-inline.txt:2:16	簡繁互查：繁体查简体
+归一	01-simplified.txt:2:25,02-traditional.txt:2:25,06-inline.txt:1:4,06-inline.txt:1:40	簡繁互查：另一组字
+变体表	01-simplified.txt:2:34,02-traditional.txt:2:34	簡繁互查：三字词
+query	03-width.txt:1:10,03-width.txt:2:10	全半角归一：半角查全角
+ｑｕｅｒｙ	03-width.txt:1:10,03-width.txt:2:10	全半角归一：全角查半角
+TSV	03-width.txt:3:16,03-width.txt:3:30	全半角归一：大写，且同行混排
+发	04-one-to-many.txt:1:19,04-one-to-many.txt:1:28,04-one-to-many.txt:1:37,04-one-to-many.txt:1:49,04-one-to-many.txt:2:22,04-one-to-many.txt:2:31,04-one-to-many.txt:2:49	一对多：简体规范形展开全部变体
+發	04-one-to-many.txt:1:19,04-one-to-many.txt:1:28,04-one-to-many.txt:1:37,04-one-to-many.txt:1:49,04-one-to-many.txt:2:22,04-one-to-many.txt:2:31	★钉子：繁体变体**不得**命中兄弟变体「髮」
+髮	04-one-to-many.txt:1:19,04-one-to-many.txt:1:28,04-one-to-many.txt:1:37,04-one-to-many.txt:1:49,04-one-to-many.txt:2:49	★钉子：同上，反向
+户	05-variant.txt:1:13,05-variant.txt:1:25,05-variant.txt:2:16,05-variant.txt:2:28	异体字
+戶	05-variant.txt:1:13,05-variant.txt:1:25,05-variant.txt:2:16,05-variant.txt:2:28	异体字反向
+the quick	07-outside-table.txt:1:19	表外字符：纯 ASCII 原样匹配
+42	07-outside-table.txt:2:19	表外字符：数字原样匹配
+ひらがな	07-outside-table.txt:3:16	表外字符：假名原样，本刀不做假名归一

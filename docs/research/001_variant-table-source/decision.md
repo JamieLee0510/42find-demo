@@ -11,19 +11,26 @@
 
 ## 我选择什么
 
-> **构建期**从 **Unicode Unihan 一手数据**抽出字符级变体关系，按 destination 反转成「规范形 → 变体集」，
-> 生成静态表编进 `find42-core`；`irg-kvariants` **不作依赖，只作交叉校验的第二意见**。
+> **构建期**从 **Unicode Unihan 一手数据**（`kTraditionalVariant` + `kSimplifiedVariant`）
+> 生成静态表编进 `find42-core`。**不需要反转，不需要分组启发式**——
+> 这两个字段原生就是我们要的非对称关系，与手推的规则逐字吻合（见 `gap.md` 落地实测）。
+> `irg-kvariants` **一行数据都不用**，只留作「变体该不该分类」这个思路的参考。
 
 ## 我放弃什么
 
-> 放弃 `irg-kvariants` 当依赖（**只因为授权，不因为技术**——它的数据结构比 Unihan 更合手）；
+> 放弃 `irg-kvariants`——取材后**技术上也不再需要它**：Unihan 两个字段原生给出非对称关系，
+> 且单向不闭合 0 处（自洽，无需第二意见）；而 irg 三年未动、全仓无 LICENSE。**又老又没授权。**
 > 放弃继续手写小表（真实语料上撑不住）；放弃工业界通行的**折叠**路线（issue #4 已拍板走查询扩展）。
 
 ## 依据来自哪一类
 
 - [x] **自有积累** —— `docs/experiments/exp001-rg-baseline-cjk/`（rg 不归一，实测）· `src/42find-core/`（非对称展开已跑通，8 个单测）
 - [x] **他人积累** —— 读到了**数据层**：`irg-kvariants` 的 `KVariant` 结构与 `KVariantClass` 分类（docs.rs 源码）· Lucene 的 `ICUTransformFilter` / `CJKWidthFilter`（官方 API 文档）· charabia 的 `ChineseNormalizer`（源码）· `cargo info` 本机核实的 11 个 crate 许可
-- [ ] **自己跑的** —— **还没有**。两个该跑的实验已在 `gap.md` 立好（覆盖率 · 分类开关对精确率的影响）
+- [ ] **自己跑的** —— **还没有**。两个该跑的实验已在 `gap.md` 立好（真实语料命中率 · 字段开关对精确率的影响）
+
+> ⚠️ **本次取材后，结论改了一次**：拍板点 1 从「A+B 交叉校验」改成「A 独用」。
+> 改的原因不是想法变了，是**数据落地后可以实测**——单向不闭合 0 处、irg 三年未动。
+> 这正是「说不出出处的不叫依据」那条铁律的用处：网页视图看不出这两件事。
 
 ---
 
@@ -72,16 +79,20 @@
 
 ## 仍未补齐的缺口
 
-> **只写一处**：Unihan 的 `kSimplifiedVariant` / `kTraditionalVariant` 是 **provisional 字段**
-> （[UAX #38](https://www.unicode.org/reports/tr38/) 明载），而它们在真实语料上的**覆盖率没有数**。
-> 这一处**该跑不该查**——`vault/raw/` 还是空的，先放真实语料，再统计覆盖前 N 高频字要多大的表。
+> **只写一处**：表的规模已经有数了（12,972 字），**但它在真实语料上的命中率仍然没有数**。
+> 这一处**该跑不该查**——`vault/raw/` 还是空的。先放真实语料，再回答两件事：
+> ① 语料里有多少字落在这 12,972 之内 ② 那 489 个一对多的字，实际出现几个。
+>
+> 另有一个**必须显式处理的数据陷阱**：两个文件各有 **431 条自指条目**（X 的变体是 X 自己，
+> [unihan-database#408](https://github.com/unicode-org/unihan-database/issues/408)）。
+> 不去重就会在展开集里留下重复字符——不致错，但会让 `expand()` 的输出变脏。
 
 ## ⚠️ 需要你拍板的地方
 
 | # | 需要拍板的 | 选项 | 我的建议 | 拍了吗 |
 |---|---|---|---|---|
-| 1 | 数据源取哪个 | A. Unihan 一手（授权干净，字段 provisional）／ B. `irg-kvariants`（结构更合手、自带分类，**授权链断**）／ C. 两个都要：A 供数据、B 供交叉校验 | **C**。用 A 的数据保授权，用 B 对一遍；**两边对不上的字，正是要你看的那几个** | ☐ |
-| 2 | 哪几类变体参与展开 | `Simplified` 必进；`Old`（旧字形，如 户/戶）· `SementicVariant`（语义变体）· `Wrong`（讹字）三类各自要不要 | `Simplified` + `Old` 进；`SementicVariant` 与 `Wrong` **默认不进**（它们最伤精确率），留 CLI 开关。**但这是产品取舍，先跑 `gap.md` 那个实验再定** | ☐ |
+| 1 | 数据源取哪个 | A. **Unihan 独用**／ B. `irg-kvariants`／ C. 两个都要，B 作交叉校验 | **A**（取材后从 C 改过来）。三条理由：① Unihan 单向不闭合 **0 处**，自洽，交叉校验没有可校验的东西 ② irg **2023-05-26 之后没动过**，全仓无 LICENSE ③ irg 独有的 `old`/`wrong!` 两类，Unihan 用 `kZVariant`/`kSemanticVariant`/`kSpoofingVariant` 覆盖且授权干净 | ☐ |
+| 2 | 哪几个 Unihan 字段参与展开 | `kSimplifiedVariant` + `kTraditionalVariant`（**12,972 字，必进**）／再加 `kZVariant`(149)／`kSemanticVariant`(3538)／`kSpoofingVariant` | 前两个进；`kZVariant` 小而稳，可进；**`kSemanticVariant` 默认不进**（3538 条，最伤精确率），留 CLI 开关。**先跑 `gap.md` 那个分类开关实验再定** | ☐ |
 | 3 | 索引期那笔账现在还是以后还 | A. 现在就把查询扩展设计成「索引期可折叠、查询期可扩展」两套并存／ B. 记进真难题①，等上索引时再说 | **B**。现在没索引，提前设计等于凭空猜；但**要把这笔账写进意向书的真难题①**，别到时候当新发现 | ☐ |
 | 4 | 意向书要不要补「精确率」成第三个数 | （issue #4 已提，仍未决） | **补**。本次分析又给了一条理由：我们选的路**唯一的好处就是精确率**，不量它，就没有依据说这条路选对了 | ☐ |
 

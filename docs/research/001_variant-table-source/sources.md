@@ -105,8 +105,17 @@ bash .claude/skills/aias-meta-research/scripts/clone.sh https://github.com/BYVoi
 | **Unicode License V3** | [unicode.org/license.txt](https://www.unicode.org/license.txt) | — | 要比的 | 逐条：允许 use/copy/modify/distribute/sell，声明放随附文档即可 |
 | **11 个 crate 的许可** | 本机 `cargo info` | 见 `gap.md` 横向表 | 要比的 | 逐条：版本 + 许可字段 |
 
-⚠️ **`resources/` 仍是空的。** 本次没 clone——问题在**授权与数据形状**，一手文档和 docs.rs 的源码页就够答。
-真要写抽取脚本时再拉，那时拉的是 **Unihan 数据包**，不是这些 crate。
+### 已取材（2026-09-06 · `clone.sh --depth 1`，共 11.8 MB，`resources/**` 不进仓）
+
+| 仓 | 角色 | 许可（**落地核实**） | 最近提交 | 判决 |
+|---|---|---|---|---|
+| `resources/unihan-database` | **要比的** | **Unicode License V3**（有 LICENSE，Copyright 2021-2026 Unicode Inc.） | **2026-07-24** | **选它**。装着 `kSimplifiedVariant` / `kTraditionalVariant` / `kZVariant` / `kSemanticVariant` / `kSpoofingVariant` |
+| `resources/charabia` | **要学的** | 根 LICENSE = **MIT**（Meili SAS）；`irg-kvariants/` 子目录**无独立 LICENSE** | 活跃 | 学它的**分类思路**（`KVariantClass` 五分类），数据一行不用 |
+| `resources/irg` | 要比的 | **全仓 `find` 无 LICENSE / COPYING / NOTICE** | **2023-05-26** | **出局**：又老又没授权 |
+
+⚠️ **落地才看得出的两件事**，网页视图给不了：
+① `irg` 三年没动过 ② Unihan 两个变体文件**单向不闭合 0 处**。
+这两条直接把拍板点 1 从「A+B」改成了「A 独用」。
 
 ⚠️ **读懂 → 自己写，绝不复制粘贴。** GPL / AGPL 只参考不链接。
 ⚠️ **协议不只回答「能不能用」，还决定「能读到哪一步」。**

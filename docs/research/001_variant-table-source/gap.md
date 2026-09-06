@@ -62,6 +62,44 @@ pub static KVARIANTS: Lazy<HashMap<char, KVariant>>
 
 ⚠️ **三家做到的都是「折叠」，没有一家做「查询扩展」。** 这是本次分析最该记住的一条，见 `decision.md` 的反对依据。
 
+### 落地实测（2026-09-06 取材后，`resources/` 三个浅克隆）
+
+**Unihan 原生就编码了我们要的非对称关系**，不需要反转、不需要分组启发式：
+
+```
+U+53D1 发   kTraditionalVariant   U+767C U+9AEE     ← 发 → {發, 髮}
+U+767C 發   kSimplifiedVariant    U+53D1            ← 發 → 发（不含 髮）
+U+9AEE 髮   kSimplifiedVariant    U+53D1            ← 髮 → 发（不含 發）
+```
+
+`expand(发)={发,發,髮}` · `expand(發)={發,发}` · `expand(髮)={髮,发}`——
+**与 `src/42find-core/src/variants.rs` 里手推的规则逐字吻合。**
+简→繁天然一对多、繁→简天然多对一，Unicode 早把这层不对称拆成了两个字段。
+
+| 项 | 实测 | 意味着 |
+|---|---|---|
+| `kSimplifiedVariant` / `kTraditionalVariant` 条目 | 6929 / 6475 | — |
+| `kTraditionalVariant` 一对多 | 466 字 2 变体 · 17 字 3 · 6 字 4 | 发/發/髮 是 **489 例之一**，不是孤例 |
+| **单向不闭合**（A 说简化成 B，B 的繁体表却没有 A） | **0 处** | 两文件完全自洽——**交叉校验闭合性没有必要** |
+| 自指条目（X 的变体是 X 自己） | 各 **431** 条 | 已知问题 [unihan-database#408](https://github.com/unicode-org/unihan-database/issues/408)，**去重即可，但必须显式处理** |
+| 参与展开的字符总数（去重） | **12,972** | 静态表规模完全可接受 |
+| `resources/` 三仓合计 | 11.8 MB（`--depth 1`） | 不进仓（`.gitignore: resources/**`） |
+
+**时效判决**：
+
+| 仓 | 最近提交 | 许可 | 判决 |
+|---|---|---|---|
+| `unicode-org/unihan-database` | **2026-07-24** | **Unicode License V3**（有 LICENSE，Copyright 2021-2026 Unicode Inc.） | **活着，授权干净** |
+| `meilisearch/charabia` | 活跃 | 根 **MIT**（Meili SAS） | 代码 MIT，**但数据不是它的** |
+| `hfhchan/irg` | **2023-05-26**（三年未动） | **全仓 `find` 无 LICENSE / COPYING / NOTICE** | **又老又没授权 —— 出局** |
+
+`charabia/irg-kvariants/dictionaries/source/kVariants.tsv` 10,629 行，分类分布
+`simp 3942 · sem 3546 · = 2129 · wrong! 602 · old 410`，方向是**多对一归到繁体 canonical**——
+与我们要的方向相反。它独有的 `old` / `wrong!` 两类，Unihan 有 `kZVariant`(149) /
+`kSemanticVariant`(3538) / `kSpoofingVariant` 对应，**且授权干净**。
+
+→ **`irg-kvariants` 从「交叉校验的第二意见」降为「一个可以学的分类思路」。** 数据一行都不用它的。
+
 ## 二、它们没做的
 
 | 找过什么 | 结论 | 是哪一种 |

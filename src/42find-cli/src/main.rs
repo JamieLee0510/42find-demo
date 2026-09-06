@@ -91,13 +91,16 @@ fn parse_args() -> Result<Option<Args>, String> {
 /// `*.后缀` 按后缀比，其余按文件名精确比。没给模式就全收。
 fn glob_matches(glob: Option<&str>, path: &Path) -> bool {
     let Some(pat) = glob else { return true };
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or_default();
+    // ⚠️ 按 `OsStr` 的字节比，**不要先 `to_str().unwrap_or_default()`**：
+    // 那会把非 UTF-8 文件名当成空串，于是 `--glob "*.txt"` 下这类文件被**静默丢弃**；
+    // 而不给 `--glob` 时它反而会被正常收入——同一条路径两种行为。
+    // macOS 的 APFS 拒绝非 UTF-8 文件名，本机复现不了；Linux 的 ext4 上是真实场景。
+    let Some(name) = path.file_name() else {
+        return false;
+    };
     match pat.strip_prefix('*') {
-        Some(suffix) => name.ends_with(suffix),
-        None => name == pat,
+        Some(suffix) => name.as_encoded_bytes().ends_with(suffix.as_bytes()),
+        None => name.as_encoded_bytes() == pat.as_bytes(),
     }
 }
 
@@ -106,7 +109,9 @@ fn glob_matches(glob: Option<&str>, path: &Path) -> bool {
 /// ⚠️ **递归时只收常规文件，且不跟随符号链接**（与 `rg` 默认一致）。跟随会让 `d/loop -> ..` 这类环
 /// 把同一个文件反复收进来：实测一处命中被报 **32 次**（rg 报 1 次）。
 /// macOS 的 `PATH_MAX` 会让路径涨到千余字符后 `read_dir` 失败，所以表现不是卡死，
-/// 而是**静默重复**——更隐蔽，且会直接污染 `scripts/bench.sh` 的召回与精确。
+/// 而是**静默重复**——更隐蔽。
+/// ⚠️ 更正一句原先写错的话：`scripts/bench.sh` 对实际命中做 `sort -u`，
+/// 所以重复**不会**反映在召回/精确上。已在 bench 里另加一条重复计数来兜住它。
 /// 命令行上**显式给出**的路径仍然跟随（下面的 `is_dir()` 用的是跟随语义）。
 fn collect(path: &Path, glob: Option<&str>, out: &mut Vec<PathBuf>) -> bool {
     if !path.is_dir() {

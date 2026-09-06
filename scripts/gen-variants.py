@@ -15,7 +15,7 @@ SRC = ROOT / "resources/unihan-database"
 OUT = ROOT / "src/42find-core/src/variants_generated.rs"
 # `cargo package` 只带 package 目录里的文件，根目录的 NOTICE / LICENSE 到不了
 # Cargo 消费者手里。这两份由脚本机器同步，不手抄——手抄就会走样（已走样过一次）。
-PKG = ROOT / "src/42find-core"
+PKGS = [ROOT / "src/42find-core", ROOT / "src/42find-cli"]
 
 # exp002 模式 B。顺序不影响结果（最终取并集），按规模排便于阅读。
 FIELDS = [
@@ -157,7 +157,9 @@ for name in ("NOTICE", "LICENSE"):
                             "# NOTICE — 第三方材料声明\n\n"
                             "> 本文件由 `scripts/gen-variants.py` 从仓库根目录的 NOTICE 同步而来，"
                             "路径已改写为 crate 视角。**不要手改。**")
-    (PKG / name).write_text(body, encoding="utf-8")
+    # 两个包都要带：cli 的二进制同样内嵌了那份数据，声明了 Unicode-3.0 就得随包带 notice
+    for pkg in PKGS:
+        (pkg / name).write_text(body, encoding="utf-8")
 
 print(f"数据版本 unihan-database @ {rev}")
 if rev.endswith("-dirty"):

@@ -44,6 +44,15 @@ run_engine() {
   esac | awk -F: 'NF>=3 { sub(/^\.\//,"",$1); print $1":"$2":"$3 }' | sort -u
 }
 
+# 不去重的原始输出——用来发现重复命中
+run_engine_raw() {
+  local engine="$1" q="$2"
+  case "$engine" in
+    rg)     (cd "$CORPUS" && "$RG" --column --no-heading --with-filename -o -F --glob "*.txt" -- "$q" . 2>/dev/null || true) ;;
+    42find) (cd "$CORPUS" && "$BIN" --column --glob "*.txt" -- "$q" . 2>/dev/null || true) ;;
+  esac | awk -F: 'NF>=3 { sub(/^\.\//,"",$1); print $1":"$2":"$3 }'
+}
+
 bench_engine() {
   local engine="$1"
   local tp_all=0 exp_all=0 act_all=0
@@ -56,7 +65,14 @@ bench_engine() {
     if [ "$expected" = "-" ]; then : > "$WORK/exp"; else
       printf '%s\n' "$expected" | tr ',' '\n' | sort -u > "$WORK/exp"
     fi
+    # sort -u 会把重复命中吃掉，所以另数一遍原始行数——符号链接环那类 bug
+    # 只会表现为重复，不会让召回/精确变化（2026-09-06 评审指出，原先的注释写错了）
+    run_engine_raw "$engine" "$q" > "$WORK/raw"
     run_engine "$engine" "$q" > "$WORK/act"
+    local n_raw n_uniq
+    n_raw=$(wc -l < "$WORK/raw" | tr -d ' '); n_uniq=$(wc -l < "$WORK/act" | tr -d ' ')
+    [ "$n_raw" -ne "$n_uniq" ] && printf '⚠️  「%s」有 %s 处重复命中（原始 %s / 去重 %s）\n' \
+        "$q" "$((n_raw - n_uniq))" "$n_raw" "$n_uniq" >&2
 
     local n_exp n_act n_tp
     n_exp=$(wc -l < "$WORK/exp" | tr -d ' ')
@@ -82,8 +98,8 @@ bench_latency() {
   local engine="$1" cmd
   [ -x "$HYPERFINE" ] || { printf '\n⚠️  没有 %s，跳过延迟\n' "$HYPERFINE" >&2; return; }
   case "$engine" in
-    rg)     cmd="$RG --column --no-heading -o -F --glob *.txt -- 检索 $CORPUS" ;;
-    42find) cmd="$BIN --column --glob *.txt -- 检索 $CORPUS" ;;
+    rg)     cmd="$RG --column --no-heading -o -F --glob '*.txt' -- 检索 $CORPUS" ;;
+    42find) cmd="$BIN --column --glob '*.txt' -- 检索 $CORPUS" ;;
   esac
   printf '\n── %s 延迟 ──\n' "$engine"
   "$HYPERFINE" --warmup 3 --runs 50 --style basic "$cmd" 2>&1 | sed -n '/Time/,/Range/p'

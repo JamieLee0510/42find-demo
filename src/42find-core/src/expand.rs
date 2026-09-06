@@ -2,7 +2,7 @@
 //!
 //! **不动语料**——所以命中的行列就是原文的行列，偏移天然精确。
 
-use crate::variants::{canonical_of, variants_of};
+use crate::variants::variants_of;
 
 /// 全角 ASCII 块 `U+FF01..=U+FF5E` 与半角 `!..~` 之间的固定偏移。
 const FULLWIDTH_OFFSET: u32 = 0xFEE0;
@@ -64,18 +64,14 @@ fn expand_char(c: char) -> Vec<char> {
         out.push(IDEOGRAPHIC_SPACE);
     }
 
-    // ⚠️ 必须并集，**不能 `else if`**：一个字可以同时是规范形与另一个字的变体。
-    // Unihan 里「裡」就是——`kTraditionalVariant` 指向自己、`kSimplifiedVariant` 指向「里」；
-    // 剥掉自指后 key 仍在，`else if` 会被前者短路，**静默吃掉反向映射**。
-    // 手写小表下不暴露（一个字要么是 key、要么在 value 里），换生成表那一刻就会现形。
-    // （`docs/experiments/exp002-unihan-coverage/` 实测：繁→简 20/27 → 21/27。）
+    // 并集在**生成期**就做完了（`scripts/gen-variants.py` 取五个字段的并集），
+    // 所以这里只有一次查表。这样从结构上消掉了「两张表用 `else if` 会短路」那一类 bug
+    // ——「裡」同时是 `kTraditionalVariant` 与 `kSimplifiedVariant` 的 key，
+    // 拆成两次查找再 `else if` 就会静默吃掉反向映射（exp002 实测）。
     //
-    // 并集**不破坏非对称**：`expand(發) = {發} ∪ 变体集{} ∪ 规范形{发}`，仍不含「髮」。
+    // 并集不破坏非对称：非对称在数据里（简→繁一对多、繁→简多对一），不在代码里。
     if let Some(vs) = variants_of(c) {
-        out.extend_from_slice(vs);
-    }
-    if let Some(canon) = canonical_of(c) {
-        out.push(canon); // 只回连规范形，兄弟变体不进来
+        out.extend(vs.chars());
     }
 
     // `Vec::dedup` 只去掉**相邻**重复；并集之后重复未必相邻，所以按出现顺序去重。

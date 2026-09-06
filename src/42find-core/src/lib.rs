@@ -9,6 +9,8 @@
 mod expand;
 mod search;
 mod variants;
+#[rustfmt::skip]
+mod variants_generated;
 
 pub use expand::{Expansion, expand};
 pub use search::{Match, search, search_line};
@@ -40,6 +42,28 @@ mod tests {
     }
 
     #[test]
+    fn 一个字同时是两个字段的key时反向映射不被吞() {
+        // ★ 钉子：「裡」在 kTraditionalVariant 里指向自己、在 kSimplifiedVariant 里指向「里」。
+        // 拆成两次查找再 else if，反向映射会被静默吃掉（exp002 实测：繁→简 20/27 → 21/27）。
+        // 手写小表时代构造不出这个用例，换生成表后才测得了。
+        assert!(class_of("裡", 0).contains(&'里'), "「裡」必须能查回「里」");
+        assert!(class_of("里", 0).contains(&'裡'));
+        assert!(class_of("里", 0).contains(&'裏'));
+    }
+
+    #[test]
+    fn 展开集无重复字符() {
+        // Vec::dedup 只去相邻重复；生成表下重复未必相邻
+        for q in ["发", "發", "里", "裡", "台", "系"] {
+            let cs = class_of(q, 0);
+            let mut sorted = cs.clone();
+            sorted.sort_unstable();
+            sorted.dedup();
+            assert_eq!(cs.len(), sorted.len(), "{q} 的展开集有重复：{cs:?}");
+        }
+    }
+
+    #[test]
     fn 全半角双向归一() {
         assert!(class_of("q", 0).contains(&'ｑ'));
         assert!(class_of("ｑ", 0).contains(&'q'));
@@ -49,8 +73,12 @@ mod tests {
 
     #[test]
     fn 表外字符原样不报错不丢弃() {
-        assert_eq!(class_of("ひ", 0), vec!['ひ']);
-        assert_eq!(class_of("龘", 0), vec!['龘']);
+        // 用的字必须**核实过**真的不在表里。原先写「龘」是错的——
+        // 它在 Unihan 里有 kSimplifiedVariant→𮹝，只是手写小表时代看不见。
+        // 「索」「日」「月」经 resources/unihan-database 全字段扫描确认无任何变体。
+        assert_eq!(class_of("ひ", 0), vec!['ひ']); // 假名，本刀不做假名归一
+        assert_eq!(class_of("索", 0), vec!['索']);
+        assert_eq!(class_of("日", 0), vec!['日']);
         assert_eq!(expand("").len(), 0);
     }
 

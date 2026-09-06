@@ -26,7 +26,7 @@ const HELP: &str = "\
 退出码：
     0 有命中 · 1 无命中 · 2 参数错误，或给定路径读不了／不是常规文件
     （空查询词是参数错误，不当作「匹配所有行」）
-    （单个文件读不出来或不是 UTF-8 —— 跳过，不算错，不影响退出码）
+    （单个文件**不是 UTF-8** —— 跳过，不算错；**权限拒绝或 IO 错误** —— 报到 stderr 并退 2）
 
 遍历：
     递归时只收常规文件、不跟随符号链接（与 rg 默认一致）——FIFO / socket / 设备节点
@@ -43,38 +43,52 @@ struct Args {
 fn parse_args() -> Result<Option<Args>, String> {
     let mut column = false;
     let mut glob = None;
-    let mut rest: Vec<String> = Vec::new();
+    let mut rest: Vec<std::ffi::OsString> = Vec::new();
     let mut only_positional = false;
 
     // 用 args_os：`std::env::args()` 遇到非 UTF-8 参数会**直接 panic**，
     // 而帮助文本只承诺「文件不是 UTF-8 就跳过」，没承诺参数也能这样崩。
-    let mut it = std::env::args_os().skip(1).map(|a| {
-        a.into_string()
-            .map_err(|bad| format!("参数不是合法 UTF-8：{}", bad.to_string_lossy()))
-    });
-    while let Some(a) = it.next().transpose()? {
+    // **只有选项与查询词要求 UTF-8**；路径一律留在 `OsString` 里。
+    // 先前对所有 argv 都 `into_string()`，于是 ext4 上非 UTF-8 的文件名
+    // **没法被点名指定**——而 `glob_matches` 那套 `OsStr` 字节比只救得到
+    // `read_dir` 发现的文件。「只修一半」这个模式已经咬过两次了。
+    let mut it = std::env::args_os().skip(1);
+    while let Some(a_os) = it.next() {
+        let a = a_os.to_str().unwrap_or_default().to_owned();
         if only_positional {
-            rest.push(a);
+            rest.push(a_os);
             continue;
         }
         match a.as_str() {
             "-h" | "--help" => return Ok(None),
             "--column" => column = true,
-            "--glob" => glob = Some(it.next().transpose()?.ok_or("--glob 后面要跟一个模式")?),
+            "--glob" => {
+                let g = it.next().ok_or("--glob 后面要跟一个模式")?;
+                glob = Some(g.into_string().map_err(|b| {
+                    format!("--glob 的模式不是合法 UTF-8：{}", b.to_string_lossy())
+                })?);
+            }
             "--" => only_positional = true,
-            other if other.starts_with('-') => return Err(format!("不认识的选项：{other}")),
-            other => rest.push(other.to_owned()),
+            other if other.starts_with('-') && !other.is_empty() => {
+                return Err(format!("不认识的选项：{other}"));
+            }
+            _ => rest.push(a_os),
         }
     }
 
     let mut rest = rest.into_iter();
-    let query = rest.next().ok_or("缺少查询词")?;
+    // 查询词必须是 UTF-8——它要被逐字符展开
+    let query = rest
+        .next()
+        .ok_or("缺少查询词")?
+        .into_string()
+        .map_err(|b| format!("查询词不是合法 UTF-8：{}", b.to_string_lossy()))?;
     if query.is_empty() {
         // rg 对空模式是「匹配所有行」，这里语义相反。与其静默返回「无命中」，
         // 不如明说——沉默的相反语义比报错难查得多。
         return Err("查询词是空的（本工具不把空模式当作匹配所有行）".to_owned());
     }
-    let paths: Vec<PathBuf> = rest.map(PathBuf::from).collect();
+    let paths: Vec<PathBuf> = rest.map(PathBuf::from).collect(); // OsString → PathBuf 无损
     let paths = if paths.is_empty() {
         vec![PathBuf::from(".")]
     } else {
@@ -202,9 +216,17 @@ fn main() -> ExitCode {
 
     let mut found = false;
     for file in &files {
-        // 读不出来或不是 UTF-8 的，跳过——不是错误，只是不参与检索
-        let Ok(text) = std::fs::read_to_string(file) else {
-            continue;
+        // 非 UTF-8 → 跳过（不算错）；权限拒绝 / IO 错误 → 报出来并计入退出码 2。
+        // 两者原先走同一条 `continue`，于是 mode-000 的文件被静默当成「无命中」——
+        // 零 stderr、退出码 1，是**静默假阴性**。rg 在这种情况下报 Permission denied 并退 2。
+        let text = match std::fs::read_to_string(file) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => continue,
+            Err(e) => {
+                eprintln!("42find: 读不了 {}：{e}", file.display());
+                ok = false;
+                continue;
+            }
         };
         for m in find42_core::search(&exp, &text) {
             found = true;

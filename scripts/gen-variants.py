@@ -30,7 +30,9 @@ if not SRC.is_dir():
     sys.exit(
         f"缺 {SRC.relative_to(ROOT)}——先取一手数据：\n"
         "  bash .claude/skills/aias-meta-research/scripts/clone.sh "
-        "https://github.com/unicode-org/unihan-database"
+        "https://github.com/unicode-org/unihan-database\n"
+        "  # ⚠️ clone.sh 拿的是默认分支的 HEAD。要复现入库的生成物，还要钉到记录的 commit：\n"
+        "  #   git -C resources/unihan-database fetch --depth 50 && git -C ... checkout <生成物头部的 commit>"
     )
 
 
@@ -50,6 +52,13 @@ def load(fn):
         out.setdefault(src, []).extend(t for t in tgts if t != src)
     return out
 
+
+# 「简→繁一对多」的分组：非对称承诺**只**落在这一类上。
+# 语义变体（kSemanticVariant / kSpecializedSemanticVariant）在 Unihan 里是**交叉登记**的，
+# 天然对称——同一个字的异写互查本就合理，不该拿非对称去要求它们。
+asym_groups = [
+    "".join(vs) for vs in load("kTraditionalVariant.txt").values() if len(vs) >= 2
+]
 
 table: dict[str, list[str]] = {}
 per_field = {}
@@ -134,6 +143,16 @@ lines += [
 ]
 lines += ["    " + ", ".join(rs_str("".join(clean[c])) for c in keys[i:i + 4]) + ","
           for i in range(0, len(keys), 4)]
+lines += [
+    "];",
+    "",
+    "/// 「简→繁一对多」的分组，**非对称承诺只落在这一类上**。",
+    "/// 每个元素是一个简体规范形对应的多个繁体变体，如 \"發髮\"。",
+    "/// 语义变体在 Unihan 里交叉登记、天然对称，不在此列——同字异写互查本就合理。",
+    "pub(crate) const ASYM_GROUPS: &[&str] = &[",
+]
+lines += ["    " + ", ".join(rs_str(g) for g in asym_groups[i:i + 4]) + ","
+          for i in range(0, len(asym_groups), 4)]
 lines += ["];", ""]
 
 OUT.write_text("\n".join(lines), encoding="utf-8")
@@ -159,13 +178,22 @@ for name in ("NOTICE", "LICENSE"):
                             "路径已改写为 crate 视角。**不要手改。**")
     # 两个包都要带：cli 的二进制同样内嵌了那份数据，声明了 Unicode-3.0 就得随包带 notice
     for pkg in PKGS:
-        (pkg / name).write_text(body, encoding="utf-8")
+        out = body
+        if name == "NOTICE" and pkg.name == "42find-cli":
+            # ⚠️ 数据表在 find42-core 里，**不在 cli 包内**。两个包套同一份改写，
+            # cli 的 NOTICE 就会指向一个它自己没有的文件（2026-09-06 评审抓到）。
+            out = out.replace(
+                "- **文件**：`src/variants_generated.rs`（机器生成，",
+                "- **文件**：依赖 `find42-core` 里的 `src/variants_generated.rs`"
+                "（本包不含该文件，但产出的二进制内嵌了它；机器生成，")
+        (pkg / name).write_text(out, encoding="utf-8")
 
 print(f"数据版本 unihan-database @ {rev}")
 if rev.endswith("-dirty"):
     print("  ⚠️ 数据 checkout 不干净——生成物无法由该 commit 复现，别拿它入库")
 for fn, n in per_field.items():
     print(f"  {fn.removesuffix('.txt'):<30} {n:>6} 条关系")
+print(f"  简→繁一对多分组（非对称承诺的范围）    {len(asym_groups):>6} 组")
 print(f"→ {OUT.relative_to(ROOT)}：{len(keys)} 个字符，"
       f"{sum(len(v) for v in clean.values())} 条展开关系，"
       f"{OUT.stat().st_size / 1024:.0f} KB")

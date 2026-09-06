@@ -8,7 +8,7 @@
 
 ## Unicode Han Database (Unihan)
 
-- **文件**：`src/variants_generated.rs`（机器生成，
+- **文件**：依赖 `find42-core` 里的 `src/variants_generated.rs`（本包不含该文件，但产出的二进制内嵌了它；机器生成，
   由 仓库的 `scripts/gen-variants.py` 从 Unihan 变体字段派生：
   `kSimplifiedVariant` · `kTraditionalVariant` · `kSemanticVariant` ·
   `kSpecializedSemanticVariant` · `kZVariant`）

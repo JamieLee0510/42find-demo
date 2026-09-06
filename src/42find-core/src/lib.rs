@@ -63,6 +63,42 @@ mod tests {
         }
     }
 
+    /// **全表结构不变量：展开不得发明数据里没有的边。**
+    ///
+    /// 对每个字符 `c`，`expand(c)` 的结果只能是 `{c}` ∪ `VALS[c]` ∪ 全半角换算——
+    /// 不得出现任何第三来源的字符。这条挡住的是**传递闭包偷偷长回来**：
+    /// 两跳会让 `expand(發)` 变成 `發发髮`，而 exp002 实测两跳一个样本都修不好
+    /// （`docs/experiments/exp002-unihan-coverage/`）。
+    ///
+    /// ⚠️ **不要把它写成「兄弟变体不得互查」**——我试过两次，两次都太强：
+    /// 第一次全表 1986 组违反（语义变体在 Unihan 里交叉登记、天然对称）；
+    /// 第二次缩到「简→繁一对多」仍有 76 组（`為/爲`、`麼/麽`、`眾/衆` 是同一个繁体字的
+    /// 两种字形，互查本来就对）。**一简对多繁里哪些该互查、哪些不该，是 Unihan
+    /// 逐对编码的语义判断，结构上推不出来。** 那一截由「发/發/髮」等钉子测试按判据守。
+    #[test]
+    fn 全表结构不变量_展开不发明新边() {
+        use crate::variants_generated::{KEYS, VALS};
+        let mut invented = Vec::new();
+        for (i, &k) in KEYS.iter().enumerate() {
+            let allowed: Vec<char> = std::iter::once(k).chain(VALS[i].chars()).collect();
+            let e = expand(&k.to_string());
+            let Some(class) = e.class(0) else { continue };
+            for &c in class {
+                // 全半角换算是规则不是查表，单独放行
+                let width_pair = (c as u32).abs_diff(k as u32) == 0xFEE0;
+                if !allowed.contains(&c) && !width_pair {
+                    invented.push((k, c));
+                }
+            }
+        }
+        assert!(
+            invented.is_empty(),
+            "展开发明了 {} 条数据里没有的边，前几例 {:?}",
+            invented.len(),
+            &invented[..invented.len().min(5)]
+        );
+    }
+
     #[test]
     fn 全半角双向归一() {
         assert!(class_of("q", 0).contains(&'ｑ'));

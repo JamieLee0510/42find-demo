@@ -24,7 +24,8 @@ const HELP: &str = "\
     路径:行[:字节列]:命中的原文
 
 退出码：
-    0 有命中 · 1 无命中 · 2 参数错误，或给定路径读不了
+    0 有命中 · 1 无命中 · 2 参数错误，或给定路径读不了／不是常规文件
+    （空查询词是参数错误，不当作「匹配所有行」）
     （单个文件读不出来或不是 UTF-8 —— 跳过，不算错，不影响退出码）
 
 遍历：
@@ -45,8 +46,13 @@ fn parse_args() -> Result<Option<Args>, String> {
     let mut rest: Vec<String> = Vec::new();
     let mut only_positional = false;
 
-    let mut it = std::env::args().skip(1);
-    while let Some(a) = it.next() {
+    // 用 args_os：`std::env::args()` 遇到非 UTF-8 参数会**直接 panic**，
+    // 而帮助文本只承诺「文件不是 UTF-8 就跳过」，没承诺参数也能这样崩。
+    let mut it = std::env::args_os().skip(1).map(|a| {
+        a.into_string()
+            .map_err(|bad| format!("参数不是合法 UTF-8：{}", bad.to_string_lossy()))
+    });
+    while let Some(a) = it.next().transpose()? {
         if only_positional {
             rest.push(a);
             continue;
@@ -54,7 +60,7 @@ fn parse_args() -> Result<Option<Args>, String> {
         match a.as_str() {
             "-h" | "--help" => return Ok(None),
             "--column" => column = true,
-            "--glob" => glob = Some(it.next().ok_or("--glob 后面要跟一个模式")?),
+            "--glob" => glob = Some(it.next().transpose()?.ok_or("--glob 后面要跟一个模式")?),
             "--" => only_positional = true,
             other if other.starts_with('-') => return Err(format!("不认识的选项：{other}")),
             other => rest.push(other.to_owned()),
@@ -63,6 +69,11 @@ fn parse_args() -> Result<Option<Args>, String> {
 
     let mut rest = rest.into_iter();
     let query = rest.next().ok_or("缺少查询词")?;
+    if query.is_empty() {
+        // rg 对空模式是「匹配所有行」，这里语义相反。与其静默返回「无命中」，
+        // 不如明说——沉默的相反语义比报错难查得多。
+        return Err("查询词是空的（本工具不把空模式当作匹配所有行）".to_owned());
+    }
     let paths: Vec<PathBuf> = rest.map(PathBuf::from).collect();
     let paths = if paths.is_empty() {
         vec![PathBuf::from(".")]
@@ -99,6 +110,20 @@ fn glob_matches(glob: Option<&str>, path: &Path) -> bool {
 /// 命令行上**显式给出**的路径仍然跟随（下面的 `is_dir()` 用的是跟随语义）。
 fn collect(path: &Path, glob: Option<&str>, out: &mut Vec<PathBuf>) -> bool {
     if !path.is_dir() {
+        // ⚠️ 顶层分支同样要挡住非常规文件。第三轮只修了下面那个递归循环，
+        // 于是 `42find -- 词 /tmp/pipe.txt` 依然永久阻塞——**同一个 bug 只修了一半**。
+        // （显式路径走跟随语义，所以这里用 `metadata()` 而非 `symlink_metadata()`。）
+        match path.metadata() {
+            Ok(md) if md.is_file() => {}
+            Ok(_) => {
+                eprintln!("42find: 不是常规文件，跳过：{}", path.display());
+                return false;
+            }
+            Err(e) => {
+                eprintln!("42find: 读不了 {}：{e}", path.display());
+                return false;
+            }
+        }
         if glob_matches(glob, path) {
             out.push(path.to_owned());
         }
@@ -251,6 +276,28 @@ mod tests {
 
         assert_eq!(files.len(), 1, "socket 不该被当成待搜文件：{files:?}");
         assert!(files[0].ends_with("real.txt"));
+    }
+
+    /// **显式**给出的非常规文件也要拒绝，不只是递归时。
+    ///
+    /// 第三轮只修了递归循环，`42find -- 词 /tmp/pipe.txt` 依然永久阻塞——
+    /// 同一个 bug 只修了一半，是换一条谱系评审才抓出来的。
+    #[test]
+    fn 显式给出的非常规文件被拒绝() {
+        let dir = std::env::temp_dir().join(format!("42find-explicit-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("建目录");
+        let sock = dir.join("s.txt");
+        let _ = std::fs::remove_file(&sock);
+        let listener = std::os::unix::net::UnixListener::bind(&sock).expect("建 socket");
+
+        let mut files = Vec::new();
+        let ok = collect(&sock, None, &mut files);
+
+        drop(listener);
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert!(!ok, "显式给一个不可搜的路径，应报失败（退出码 2）");
+        assert!(files.is_empty(), "非常规文件不该进待搜列表：{files:?}");
     }
 
     #[test]

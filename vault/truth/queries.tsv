@@ -10,6 +10,10 @@
 # ★陷阱：该写法**在语料里但不在期望里**——它是范围外的（地区词/用字习惯）。
 #   谁哪天让 42find 命中它，精确率就掉，闸门会抓住。这是有意留的。
 # ⚠️ 已知漏：在承诺范围内但当前找不到。召回率因此不是 100%——那是真数，不修饰。
+# ⚠️ 重叠命中口径：42find 允许重叠，bench.sh 的 rg 基线用 -o（不重叠）。
+#   当前 34 条查询里没有会重叠的用例，所以两边一致；**一旦加入重叠查询，两个数会分歧**。
+#   （2026-09-06 DeepSeek 评审 P3-b 指出。不改口径，因为改了就与本文件已有的期望值冲突；
+#   加重叠查询之前必须先决定口径。）
 
 检索	01-simplified.txt:2:16,02-traditional.txt:2:16,06-inline.txt:1:13,06-inline.txt:1:31,06-inline.txt:2:16,08-real-simplified.txt:1:1,09-real-traditional.txt:1:1	簡繁互查：简体查繁体
 檢索	01-simplified.txt:2:16,02-traditional.txt:2:16,06-inline.txt:1:13,06-inline.txt:1:31,06-inline.txt:2:16,08-real-simplified.txt:1:1,09-real-traditional.txt:1:1	簡繁互查：繁体查简体

@@ -141,8 +141,23 @@ OUT.write_text("\n".join(lines), encoding="utf-8")
 # 分发义务：Unicode-3.0 要求 notice 随副本或随附文档出现
 for name in ("NOTICE", "LICENSE"):
     src_file = ROOT / name
-    if src_file.is_file():
-        (PKG / name).write_text(src_file.read_text(encoding="utf-8"), encoding="utf-8")
+    if not src_file.is_file():
+        continue
+    body = src_file.read_text(encoding="utf-8")
+    # 路径要换成 **crate 视角**——原样抄进去的话，package 消费者看到的
+    # `src/42find-core/src/...` 与「根目录」都指向不存在的位置。
+    body = (body
+            .replace("`src/42find-core/src/variants_generated.rs`", "`src/variants_generated.rs`")
+            .replace("`scripts/gen-variants.py`", "仓库的 `scripts/gen-variants.py`")
+            .replace("`resources/unihan-database/LICENSE`", "上游 `unihan-database/LICENSE`")
+            .replace("仓库根目录 NOTICE", "本 crate 的 NOTICE")
+            .replace("[`LICENSE`](LICENSE)", "同目录的 `LICENSE`"))
+    if name == "NOTICE":
+        body = body.replace("# NOTICE — 第三方材料声明",
+                            "# NOTICE — 第三方材料声明\n\n"
+                            "> 本文件由 `scripts/gen-variants.py` 从仓库根目录的 NOTICE 同步而来，"
+                            "路径已改写为 crate 视角。**不要手改。**")
+    (PKG / name).write_text(body, encoding="utf-8")
 
 print(f"数据版本 unihan-database @ {rev}")
 if rev.endswith("-dirty"):

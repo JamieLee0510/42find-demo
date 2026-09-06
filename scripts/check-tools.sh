@@ -47,6 +47,20 @@ esac
 have() { command -v "$1" >/dev/null 2>&1; }
 MISSING=""
 
+# ~/.cargo/bin 只有**登录 shell** 才会从 ~/.cargo/env 读进 PATH。脚本、CI、AI 起的
+# 非登录 shell 都看不见它，于是 command -v 把「装好了的」报成「没装」。
+# **误报比不检查更糟**：它会让人去重装一遍已经有的东西。
+# 这一段必须在所有 check 之前——rustup/cargo 和 cargo install 装的 rg 都住在那儿。
+# （2026-09-05：工具链和 rg 先后各踩一次。）
+if [ -d "$HOME/.cargo/bin" ] && [ ":$PATH:" != *":$HOME/.cargo/bin:"* ]; then
+  case ":$PATH:" in
+    *":$HOME/.cargo/bin:"*) : ;;
+    *) echo "  ⚠️ ~/.cargo/bin 不在当前 PATH 里，本次检查临时加上。"
+       echo "     要长期生效，在 shell 配置里加：source \"\$HOME/.cargo/env\""
+       PATH="$HOME/.cargo/bin:$PATH" ;;
+  esac
+fi
+
 # 名字 · 一句话 · 装法（按平台）
 check() {
   local cmd="$1" what="$2" how_mac="$3" how_linux="$4" how_win="$5"
@@ -77,9 +91,12 @@ check uv   "更快的那个 Python 入口" 'brew install uv' 'curl -LsSf https:/
 echo
 echo "▸ 常用命令行工具"
 check git      "版本控制。没它，状态持久化无从谈起" 'brew install git' '包管理器装 git' 'scoop install git'
-check rg       "全文检索，比 grep 快很多" 'brew install ripgrep' '包管理器装 ripgrep' 'scoop install ripgrep'
+# ⚠️ rg 对本项目不是普通工具，是**基准线**（42find 要赢的就是它），必装。
+#    坑：Claude Code 会注入一个同名 shell 函数把 rg 转给自己内置的那份，
+#    于是交互式敲 rg 有输出、脚本里却查不到。测基准务必走 ~/.cargo/bin/rg。
+check rg       "全文检索。本项目的基准线，必装" 'cargo install ripgrep' 'cargo install ripgrep' 'cargo install ripgrep'
 check jq       "命令行里处理 JSON" 'brew install jq' '包管理器装 jq' 'scoop install jq'
-check gitleaks "提交前扫密钥——给新手保命的那一把" 'brew install gitleaks' '见项目 releases' 'scoop install gitleaks'
+check gitleaks "提交前扫密钥——给新手保命的那一把" '官方 release 二进制 → ~/.local/bin' '同左' '同左'
 check gh       "GitHub 命令行入口" 'brew install gh' '见 cli.github.com' 'scoop install gh'
 
 echo
@@ -99,18 +116,6 @@ echo "  **一个都没有也能干活，但你就少了一双不同来路的眼�
 STACK_EMPTY=0   # 已按本系统技术栈（Rust workspace）填入，见下
 echo
 echo "▸ 本系统专属（Rust workspace：src/42find-cli 入口 · src/42find-core 能力）"
-
-# rustup 把 shim 装在 ~/.cargo/bin，而这条 PATH 只有**登录 shell** 才会
-# 从 ~/.cargo/env 里读进来。脚本、CI、AI 起的非登录 shell 都看不到它——
-# 于是 command -v 会把「装好了的工具链」报成「一个都没装」。
-# **误报比不检查更糟**：它会让人去重装一遍已经装好的东西。
-# 所以这里分三态：在 PATH 里 / 装了但不在 PATH / 真没装。
-# （2026-09-05：本机就是第二种，第一次跑全报缺。）
-if ! have rustup && [ -x "$HOME/.cargo/bin/rustup" ]; then
-  echo "  ⚠️ ~/.cargo/bin 不在当前 PATH 里——工具链其实装了，只是这个 shell 看不见。"
-  echo "     本次检查临时加上它；要长期生效，在 shell 配置里加：source \"\$HOME/.cargo/env\""
-  PATH="$HOME/.cargo/bin:$PATH"
-fi
 
 check rustup "Rust 工具链管理器。版本锁定靠它读 rust-toolchain.toml" \
   'brew install rustup && rustup-init' '见 rustup.rs' '见 rustup.rs'
@@ -138,7 +143,7 @@ fi
 # 验证闭环要量两个数：召回率与查询延迟（见 .42cog/intent.md「作品区」）。
 # 召回率自己算，延迟需要一把靠谱的计时器——没有它，「快」就只是印象。
 check hyperfine "命令行基准计时。延迟那个数靠它量" \
-  'brew install hyperfine' '见项目 releases' 'scoop install hyperfine'
+  'cargo install hyperfine' 'cargo install hyperfine' 'cargo install hyperfine'
 
 echo
 if [ "$STACK_EMPTY" = 1 ]; then

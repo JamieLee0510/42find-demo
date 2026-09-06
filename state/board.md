@@ -55,3 +55,62 @@
 > 解法：装 Claude GitHub App（`/install-github-app`，接 `anthropics/claude-code-action@v1`），
 > PR 署 `claude[bot]`，人来 approve。**代价**：活儿从本地会话搬到 GitHub Actions（`@claude` 触发）。
 > 要让本地会话也能开 bot 署名的 PR，只有第二个 GitHub 账号 + 它自己的 PAT 这一条路。
+
+> ## 🔓 审批与身份：改走 admin bypass（2026-09-05）
+> **决定**：人给自己在 ruleset 里加了 `RepositoryRole(always)` 的 bypass，`current_user_can_bypass=always`。
+> 于是「PR 必须由非本人发起才能 approve」这个约束不再需要绕——**单人仓，直接放行**。
+>
+> 随之移除的：`.github/workflows/claude.yml` 与 `claude-code-review.yml`（PR #2，**从未进入 main**，已关闭并删分支）。
+> 记一笔它们当时的状态，省得以后重装再踩一遍：**生成出来是只读的**
+> （`contents: read` / `pull-requests: read`），`claude-code-review` 在 PR #2 上跑过一轮 SUCCESS 但一个字没发——
+> 要它能推分支、开 PR、发评论，必须改成 `contents: write` / `pull-requests: write` / `issues: write`。
+> 仓库 secret `CLAUDE_CODE_OAUTH_TOKEN` **还留着**（workflow 没了，它现在没人用）。
+>
+> **闸门现状**：`main` 仍要求 PR + 1 approval + `gate` 绿，但**你可以 bypass**。
+> 也就是说闸门对 AI 有效、对你无效——这是有意的，不是漏配。
+
+> ## 🧪 exp001：rg 基准线实测，推翻了意向书里的一条（2026-09-05）
+> 装齐 `ripgrep 15.2.0`（`cargo install`）与 `gitleaks 8.30.1`（官方 release + 核 checksum）。
+> gitleaks 扫工作区与全部 6 个提交：**no leaks found**。
+>
+> `docs/experiments/exp001-rg-baseline-cjk/` 拿真 rg 跑了四类中文查询，结论：
+> **簡繁不互查 ✅ 坐实 · 全半角不归一 ✅ 坐实 · 「詞在句中」❌ 假设被推翻**——
+> rg 做子串匹配、根本不分词，句中命中毫无问题。
+> **这一条要回写进 `.42cog/intent.md`**：切分是 42find 用索引后自己给自己挖的坑，
+> 不是相对 rg 的优势点；真正能赢的是字符层面的归一。
+>
+> ⚠️ 坑：Claude Code 注入了一个同名 `rg` shell 函数（转给内置的 14.1.1），
+> 交互式敲有输出、脚本里查不到。**测基准必须走 `~/.cargo/bin/rg`。**
+> `scripts/check-tools.sh` 的 PATH 补丁已前移到所有 check 之前（先前只覆盖了「本系统专属」那一段）。
+> 安装提示也改成本项目真实走的路子（rg / hyperfine → `cargo install`，gitleaks → 官方 release）。
+>
+> **现在只缺**：`hyperfine`（延迟那个数）与 `opencode`（换谱系评审，下一步要用）。
+
+> ## 🧰 工具清单第一次全绿（2026-09-06）
+> `bash scripts/check-tools.sh` → **「都齐了」，退出码 0**。补装的两件：
+> - `hyperfine 1.20.0`（`cargo install hyperfine`）——延迟那个数从此量得出来
+> - `opencode 1.18.29`（`npm install -g opencode-ai`）——换谱系评审的第二套装置。
+>   ⚠️ 装之前核过：npm 上 `opencode-ai` 的 metadata **没有 repository/homepage/description**，
+>   不能凭包名就装；去 `opencode.ai/docs` 确认了它确实是官方包名才装的。
+>   （`check-tools.sh` 自己写着「只从官方或可信源装；装之前核一眼包名与维护状态」——这次是照着做的。）
+>
+> **MCP（`sequential-thinking` / `playwright`）：配置在，会话里没连上。**
+> 二者都配在 `~/.claude.json` 的本项目 `mcpServers` 下，走 `npx` 现拉。实测两个包都能跑
+> （`@playwright/mcp 0.0.80`；sequential-thinking 对 `initialize` 正常应答，version 2026.8.31），
+> playwright 的浏览器早就下过（`~/Library/Caches/ms-playwright`，1.1G）。
+> **MCP 只在会话启动那一刻连接**——所以要用它们得重开会话，装无可装。
+> 另：本项目用不到 playwright（42find 是本地命令行工具，不碰浏览器）。
+
+> ## ✍️ exp001 结论回写完毕（2026-09-06）
+> 上一轮只改了收敛方向那一句，剩下两处矛盾这轮补齐：
+> ① `.42cog/intent.md` 第 3 行副标题还挂着被推翻的「詞在句中」——已换成「簡繁互查、全半角归一」。
+> ② exp001 readme 末尾用「真难题①②」指代意向书，**编号对不上**（意向书①是索引一致性、②才是切分，
+> 「字符归一」根本不在那张表上）。已改成按内容指代，不再用编号。
+> 同时在意向书「真难题」第 2 条下补一行实测锚点，并写明**字符归一不是难题、是收敛方向的本体**
+> （基础映射就是查表；难的只有繁简一对多、异体字、日文假名那截尾巴，跟着第 2 条一起解）。
+>
+> ⚠️ **本文件的顺序与自己写的规则相反**：抬头写「倒序追加，新的在上」，实际是最新的在最下面。
+> 这轮按现状追加在末尾，没有擅自重排——要不要按规则翻过来，你定。
+>
+> **下一步**：`src/` 还是两个空壳 crate、0 个测试，验证闭环缺**固定语料**与**黄金查询集**两个必需件
+> （exp001 那四条查询是第一批素材，归宿 `vault/truth/`）。第一刀切在 `42find-core` 的字符归一层。

@@ -102,8 +102,12 @@ Unicode 早把这层不对称拆成了两个字段。**不需要反转，不需�
 要用户先装 libopencc，直接毁掉「一个二进制」这个前提）。
 
 **规模**：参与展开 12,972 字；一对多 489 例（466 字 2 变体 / 17 字 3 / 6 字 4）。
-**已知陷阱**：两文件各有 431 条自指条目（[unihan-database#408](https://github.com/unicode-org/unihan-database/issues/408)），
-去重即可，但**必须显式处理**，否则展开集里会有重复字符。
+**已知陷阱（exp002 实测后加重）**：两文件各有 431 条自指条目
+（[unihan-database#408](https://github.com/unicode-org/unihan-database/issues/408)）。
+我原先写「去重即可，不致错」——**低估了**。剥掉自指后 key 仍在，
+于是一个字可以同时是两个文件的 key（如 `裡`），`if/elif` 会被前者短路、
+**静默吃掉反向映射**。`expand.rs` 现在也是 `if/else if`，手写小表下不暴露，
+**换 Unihan 的那一刻就会现形**——决策三落地时必须一并改成并集。
 
 ---
 
@@ -148,8 +152,11 @@ Match { line, col, text }             // col 是 1-based 字节列，与 rg --co
 
 ## 仍待拍板（AI 不代填）
 
-1. 哪几个 Unihan 字段进：`kSimplified` + `kTraditional` 必进；`kZVariant`(149) 可进；
-   **`kSemanticVariant`(3538) 建议默认不进**（最伤精确率）——先跑实验再定。
+1. 哪几个 Unihan 字段进。**原建议「`kSemanticVariant` 默认不进（最伤精确率）」已被 exp002 推翻**
+   ——实测加进三个附加字段净赚一条、两条钉子都守住、展开集只从 2.43 涨到 2.76 字。
+   **改建议：`kSimplified` + `kTraditional` + `kSemantic` + `kSpecializedSemantic` + `kZ` 全进（一跳）。**
+   真正要你拍的是另一件：**要不要开两跳**——两跳能把词级从 19/20 做到 20/20（多修好「乾淨」），
+   代价是**打破非对称**（`expand(發)` 会变成 `發发髮`）。见 `experiments/exp002-unihan-coverage/`。
 2. 上索引时多 term OR 那笔账，现在设计还是以后再说（建议以后，但**要写进意向书真难题①**）。
 3. 意向书判据要不要补**精确率**成第三个数（建议补：这条路唯一不可替代的好处就是它）。
 4. 语料与黄金查询集的标准归人，AI 出的是初稿，等过目。

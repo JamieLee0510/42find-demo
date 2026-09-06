@@ -105,7 +105,7 @@ U+9AEE 髮   kSimplifiedVariant    U+53D1            ← 髮 → 发（不含 �
 | 找过什么 | 结论 | 是哪一种 |
 |---|---|---|
 | **非对称展开**（查「發」不命中「髮」） | **无人涉足**——Lucene / charabia 都折叠到 canonical，折叠天然对称，`發` 与 `髮` 同归 `发` 之后就互相可查 | **没顾上做**：他们的场景是「找到就行」，精确率损失可接受；42find 承诺的是「所有出现处」，能不能承受这个损失是**产品取舍不是技术天堑** |
-| **保住原文偏移的归一** | **有但不适用**：折叠路线天生丢偏移，各家靠索引存 term 位置绕开——而 42find 这一刀**还没有索引** | **做不到**（在折叠路线里）；换成查询扩展就自然没有这个问题 |
+| **保住原文偏移的归一** | ~~折叠路线天生丢偏移~~ **这句错了，取材后已订正**：charabia 用 `char_map` 解决了（`charabia/src/token.rs:57-59`），代价是每 token 一个 `Vec<(u8,u8)>`，且**默认关**（`charabia/src/normalizer/mod.rs:85`） | **做得到，只是要掏钱**。查询扩展省掉的是这笔钱，不是解决了一个无解问题——见「三、逐条核查」第 2 节第 2 条 |
 | **tantivy 的 CJK 查询一致性** | 有但不适用：[issue #718](https://github.com/quickwit-oss/tantivy/issues/718) 长期开着 | **做不到**——QueryParser 与字段分词器不同步是架构层的，提醒我们上索引时会撞上同一堵墙 |
 
 ### 该不该自己跑一个
@@ -117,3 +117,41 @@ U+9AEE 髮   kSimplifiedVariant    U+53D1            ← 髮 → 发（不含 �
 | **哪几类变体参与展开，精确率各掉多少** | **跑它**——`Simplified` / `Old` / `Wrong` / `SementicVariant` 逐类开关，量四次召回与精确。**这正是「输出清楚、不知道拿什么喂」的场合** |
 
 → 两个都归 `docs/experiments/`，**不在本目录另开一处**。
+
+---
+
+## 三、逐条核查：`resources/charabia` 读后（2026-09-06）
+
+> 规矩：**给不出「哪个文件、哪几行」的结论一律不写。**
+> 另两个仓（`unihan-database` / `irg`）是纯数据，无实现可读，本节只针对 `charabia`。
+
+### 1 · 我要做的这件事，它是怎么做的
+
+| 做法 | 出处 |
+|---|---|
+| **逐字符折叠**：查表取 `destination_ideograph`，**查不到就原样返回 `c`**（表外字符不报错不丢弃——与我们一致） | `charabia/src/normalizer/chinese.rs:19-22` |
+| **全半角走 NFKD**（不是 NFKC），且在**始终生效**那一档 | `charabia/src/normalizer/compatibility_decomposition.rs:18`；档位见 `charabia/src/normalizer/mod.rs:52-61` |
+| **簡繁归一在另一档**：`ChineseNormalizer` 属于 `LOSSY_NORMALIZERS` | `charabia/src/normalizer/mod.rs:64-77`，具体第 `69-70` 行 |
+| **偏移靠 `char_map` 维护**：原文每字符字节数 → 归一后字节数 | 定义 `charabia/src/token.rs:57-59`；首次建立 `charabia/src/normalizer/mod.rs:198-210`；逐层叠加 `mod.rs:182-196`；换算回原文 `charabia/src/token.rs:139-152` |
+| **应用范围显式收窄**：只在 `Script::Cj` 且语言为 None/Cmn/Zho 时生效 | `charabia/src/normalizer/chinese.rs:40-43` |
+| **数据构建期压成三列再内嵌** | `irg-kvariants/build.rs:23-45`；`irg-kvariants/src/lib.rs:37` |
+
+### 2 · 该照着抄的设计判断（抄判断，不抄代码）
+
+| # | 判断 | 出处 | 对 42find 意味着什么 |
+|---|---|---|---|
+| 1 | **把「有损」写进结构，而不是写进注释**：常规归一与有损归一是**两个列表**，簡繁归一在有损那一档 | `charabia/src/normalizer/mod.rs:52-61` vs `64-77`（`ChineseNormalizer` 在 `69-70`） | `kSemanticVariant`(3538) 该归进「有损」并**默认关**，靠类型和默认值挡住，不靠注释提醒 |
+| 2 | **「折叠 + 保偏移」有现成解法，代价是每 token 一个 `Vec<(u8,u8)>`；而且默认不付这个代价** | `charabia/src/token.rs:57-59`；默认值 `charabia/src/normalizer/mod.rs:85`（`create_char_map: false`） | **直接修正我上面写的判断**——折叠不是「天生丢偏移」，是**要额外掏钱**。我们选查询扩展省掉的是这笔钱，不是解决了一个无解问题 |
+| 3 | **拒绝传递闭包，并用测试钉住**：destination 不许再有 destination | `irg-kvariants/src/lib.rs:126-142`（`test_no_loop`） | 与我们「变体只回连规范形、不连兄弟变体」是同一判断的两种说法。他们用测试钉，我们已有两条钉子测试，方向对 |
+| 4 | **暂不处理的事，把「以后怎么处理」一起写在断言里** | `irg-kvariants/src/lib.rs:60-65`（`debug_assert!` 的消息写明「以后要按 classification 定优先级」） | **这条是警告不是范本**：他们的数据一源一目标，我们的 Unihan **有 489 例一对多**，所以这个优先级我们**现在就得定** |
+
+### 3 · 它明确没做什么，以及是能力还是刻意
+
+| # | 没做的 | 出处 | 判定 |
+|---|---|---|---|
+| 1 | **没有反向查询**——给不出「规范形 → 变体集」。canonical 字符根本不是 key | `irg-kvariants/src/lib.rs:123`：`assert_eq!(KVARIANTS.get(&'刃'), None)` | **刻意**。折叠只需单向，反向对它无用 |
+| 2 | **没做一源多目标** | `irg-kvariants/src/lib.rs:60-65` | **刻意推迟**。断言里写明了将来怎么补 |
+| 3 | **没做传递闭包** | `irg-kvariants/src/lib.rs:126-142` | **刻意**，有测试守着 |
+| 4 | **拼音归一默认不开** | `charabia/src/normalizer/chinese.rs:1` 与 `:27`（`#[cfg(feature = "chinese-normalization-pinyin")]`） | **刻意**。拼音把同音字全混在一起，损失过大，做成可选 |
+| 5 | **偏移映射默认关** | `charabia/src/normalizer/mod.rs:85` | **刻意**。代价按需付 |
+| 6 | **一份死代码没删干净**：`charabia/src/normalizer/chinese/kvariants.rs` 全文与 `irg-kvariants/src/lib.rs` 重复，但**全仓没有任何 `mod kvariants` 引用它**（`chinese.rs:19` 用的是外部 crate `irg_kvariants`），且它 `include_str!` 的 `dictionaries/txt/chinese/kVariants.tsv` **在仓里不存在** | 死文件 `charabia/src/normalizer/chinese/kvariants.rs:37`；实际引用 `charabia/src/normalizer/chinese.rs:19` | **不是刻意，是遗漏**。把 in-tree 版本抽成独立 crate 之后留下的残骸。**对我们的意义**：铁律 7「唯一编码」不是洁癖——留副本就会留出这种东西，而且是在一个维护良好的仓里 |

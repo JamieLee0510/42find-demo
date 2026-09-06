@@ -85,3 +85,18 @@
 > 安装提示也改成本项目真实走的路子（rg / hyperfine → `cargo install`，gitleaks → 官方 release）。
 >
 > **现在只缺**：`hyperfine`（延迟那个数）与 `opencode`（换谱系评审，下一步要用）。
+
+> ## 🧰 工具清单第一次全绿（2026-09-06）
+> `bash scripts/check-tools.sh` → **「都齐了」，退出码 0**。补装的两件：
+> - `hyperfine 1.20.0`（`cargo install hyperfine`）——延迟那个数从此量得出来
+> - `opencode 1.18.29`（`npm install -g opencode-ai`）——换谱系评审的第二套装置。
+>   ⚠️ 装之前核过：npm 上 `opencode-ai` 的 metadata **没有 repository/homepage/description**，
+>   不能凭包名就装；去 `opencode.ai/docs` 确认了它确实是官方包名才装的。
+>   （`check-tools.sh` 自己写着「只从官方或可信源装；装之前核一眼包名与维护状态」——这次是照着做的。）
+>
+> **MCP（`sequential-thinking` / `playwright`）：配置在，会话里没连上。**
+> 二者都配在 `~/.claude.json` 的本项目 `mcpServers` 下，走 `npx` 现拉。实测两个包都能跑
+> （`@playwright/mcp 0.0.80`；sequential-thinking 对 `initialize` 正常应答，version 2026.8.31），
+> playwright 的浏览器早就下过（`~/Library/Caches/ms-playwright`，1.1G）。
+> **MCP 只在会话启动那一刻连接**——所以要用它们得重开会话，装无可装。
+> 另：本项目用不到 playwright（42find 是本地命令行工具，不碰浏览器）。

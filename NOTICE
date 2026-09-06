@@ -6,15 +6,12 @@
 
 ## Unicode Han Database (Unihan)
 
-- **文件**：`src/42find-core/src/variants_generated.rs`（机器生成，
-  由 `scripts/gen-variants.py` 从 Unihan 变体字段派生：
-  `kSimplifiedVariant` · `kTraditionalVariant` · `kSemanticVariant` ·
-  `kSpecializedSemanticVariant` · `kZVariant`）
+- **文件**：`src/42find-core/src/variants_generated.rs`（机器生成）
 - **来源**：<https://github.com/unicode-org/unihan-database>
 - **SPDX**：`Unicode-3.0`
 
-下面是**上游 `LICENSE` 的逐字照抄**（取自 `resources/unihan-database/LICENSE`）。
-⚠️ 不要转述、不要凭印象重写——2026-09-06 的评审抓到过一次：
+下面是**上游 `LICENSE` 的逐字照抄**，由 `scripts/gen-variants.py` 从文件读出写入。
+⚠️ 不要手改、不要转述——2026-09-06 的评审抓到过一次：
 版权年份被写成 `1991-2026`，上游实为 `2021-2026`。许可文本只能照抄。
 
 ```

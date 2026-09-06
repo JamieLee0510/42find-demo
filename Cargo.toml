@@ -16,6 +16,11 @@ edition = "2024"
 # 只写 MIT 会对 Cargo 消费者错误声明。完整文本见根目录 `NOTICE`。
 license = "MIT AND Unicode-3.0"
 
+# ⚠️ 闸门的牙齿要装两副。先前只 deny 了 clippy 的警告，**rustc 自己的警告一路放行**——
+# 于是一段 `ASYM_GROUPS` 死代码在仓里躺了好几轮，编译器每次都在说，
+# 而六轮对抗性评审都没提（评审读的是 diff，不是编译输出）。
+[workspace.lints.rust]
+warnings = "deny"
+
 [workspace.lints.clippy]
-# CI 闸门第二条要真的有牙齿：警告即失败。
 all = { level = "deny", priority = -1 }

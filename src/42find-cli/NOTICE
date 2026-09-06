@@ -1,6 +1,6 @@
 # NOTICE — 第三方材料声明
 
-> 本文件由 `scripts/gen-variants.py` 从仓库根目录的 NOTICE 同步而来，路径已改写为 crate 视角。**不要手改。**
+> 本文件由 `scripts/gen-variants.py` 生成，路径已改写为 crate 视角。**不要手改。**
 
 本项目代码以 MIT 许可发布（见 同目录的 `LICENSE`）。
 除此之外，产出的 `42find` 二进制中**内嵌了一份 Unicode 数据的衍生物**，
@@ -8,15 +8,12 @@
 
 ## Unicode Han Database (Unihan)
 
-- **文件**：依赖 `find42-core` 里的 `src/variants_generated.rs`（本包不含该文件，但产出的二进制内嵌了它；机器生成，
-  由 仓库的 `scripts/gen-variants.py` 从 Unihan 变体字段派生：
-  `kSimplifiedVariant` · `kTraditionalVariant` · `kSemanticVariant` ·
-  `kSpecializedSemanticVariant` · `kZVariant`）
+- **文件**：依赖 `find42-core` 里的 `src/variants_generated.rs`（本包不含该文件，但产出的二进制内嵌了它）
 - **来源**：<https://github.com/unicode-org/unihan-database>
 - **SPDX**：`Unicode-3.0`
 
-下面是**上游 `LICENSE` 的逐字照抄**（取自 上游 `unihan-database/LICENSE`）。
-⚠️ 不要转述、不要凭印象重写——2026-09-06 的评审抓到过一次：
+下面是**上游 `LICENSE` 的逐字照抄**，由 `scripts/gen-variants.py` 从文件读出写入。
+⚠️ 不要手改、不要转述——2026-09-06 的评审抓到过一次：
 版权年份被写成 `1991-2026`，上游实为 `2021-2026`。许可文本只能照抄。
 
 ```

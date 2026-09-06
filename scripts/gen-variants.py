@@ -37,7 +37,15 @@ if not SRC.is_dir():
 
 
 def load(fn):
-    """解析一个 Unihan 变体文件。行格式：`U+XXXX 字\\t字段名\\tU+YYYY U+ZZZZ<来源`"""
+    """解析一个 Unihan 变体文件。
+
+    ⚠️ `docs/experiments/exp002-unihan-coverage/probe.py` 里有一份**同形但已漂移**的实现
+    （那边是 `m[src] = [...]` 后写覆盖，这边是 `setdefault().extend()` 累加）。
+    当前 Unihan 每字段每字符一行，两者结果相同；**上游哪天在一个字段里给同一个字符出两行，
+    探针与生成器就会给出不同的表**——而 exp002 的结论正是拿来给这里选字段的依据。
+    改这里必须同步改那边（那份是实验的事实记录，不主动重构）。
+
+    行格式：`U+XXXX 字\\t字段名\\tU+YYYY U+ZZZZ<来源`"""
     out = {}
     for line in (SRC / fn).read_text(encoding="utf-8").splitlines():
         if line.startswith("#") or not line.strip():
@@ -52,13 +60,6 @@ def load(fn):
         out.setdefault(src, []).extend(t for t in tgts if t != src)
     return out
 
-
-# 「简→繁一对多」的分组：非对称承诺**只**落在这一类上。
-# 语义变体（kSemanticVariant / kSpecializedSemanticVariant）在 Unihan 里是**交叉登记**的，
-# 天然对称——同一个字的异写互查本就合理，不该拿非对称去要求它们。
-asym_groups = [
-    "".join(vs) for vs in load("kTraditionalVariant.txt").values() if len(vs) >= 2
-]
 
 table: dict[str, list[str]] = {}
 per_field = {}
@@ -126,7 +127,7 @@ lines = [
     # 版权行**从上游 LICENSE 里读**，不写死——写死过一次，年份就编错了一次
     f"// {upstream_copyright()}",
     "// Licensed under the Unicode License V3 (SPDX: Unicode-3.0)；本表是该数据的衍生物。",
-    "// 完整许可文本见仓库根目录 NOTICE（上游 LICENSE 的逐字照抄）。",
+    "// 完整许可文本见同 crate 根目录的 NOTICE（上游 LICENSE 的逐字照抄）。",
     "//",
     "// ⚠️ kSimplifiedVariant / kTraditionalVariant 在 UAX #38 里是 provisional 字段。",
     "",
@@ -143,57 +144,65 @@ lines += [
 ]
 lines += ["    " + ", ".join(rs_str("".join(clean[c])) for c in keys[i:i + 4]) + ","
           for i in range(0, len(keys), 4)]
-lines += [
-    "];",
-    "",
-    "/// 「简→繁一对多」的分组，**非对称承诺只落在这一类上**。",
-    "/// 每个元素是一个简体规范形对应的多个繁体变体，如 \"發髮\"。",
-    "/// 语义变体在 Unihan 里交叉登记、天然对称，不在此列——同字异写互查本就合理。",
-    "pub(crate) const ASYM_GROUPS: &[&str] = &[",
-]
-lines += ["    " + ", ".join(rs_str(g) for g in asym_groups[i:i + 4]) + ","
-          for i in range(0, len(asym_groups), 4)]
 lines += ["];", ""]
 
 OUT.write_text("\n".join(lines), encoding="utf-8")
 
-# 分发义务：Unicode-3.0 要求 notice 随副本或随附文档出现
-for name in ("NOTICE", "LICENSE"):
-    src_file = ROOT / name
-    if not src_file.is_file():
-        continue
-    body = src_file.read_text(encoding="utf-8")
-    # 路径要换成 **crate 视角**——原样抄进去的话，package 消费者看到的
-    # `src/42find-core/src/...` 与「根目录」都指向不存在的位置。
-    body = (body
-            .replace("`src/42find-core/src/variants_generated.rs`", "`src/variants_generated.rs`")
-            .replace("`scripts/gen-variants.py`", "仓库的 `scripts/gen-variants.py`")
-            .replace("`resources/unihan-database/LICENSE`", "上游 `unihan-database/LICENSE`")
-            .replace("仓库根目录 NOTICE", "本 crate 的 NOTICE")
-            .replace("[`LICENSE`](LICENSE)", "同目录的 `LICENSE`"))
-    if name == "NOTICE":
-        body = body.replace("# NOTICE — 第三方材料声明",
-                            "# NOTICE — 第三方材料声明\n\n"
-                            "> 本文件由 `scripts/gen-variants.py` 从仓库根目录的 NOTICE 同步而来，"
-                            "路径已改写为 crate 视角。**不要手改。**")
-    # 两个包都要带：cli 的二进制同样内嵌了那份数据，声明了 Unicode-3.0 就得随包带 notice
-    for pkg in PKGS:
-        out = body
-        if name == "NOTICE" and pkg.name == "42find-cli":
-            # ⚠️ 数据表在 find42-core 里，**不在 cli 包内**。两个包套同一份改写，
-            # cli 的 NOTICE 就会指向一个它自己没有的文件（2026-09-06 评审抓到）。
-            out = out.replace(
-                "- **文件**：`src/variants_generated.rs`（机器生成，",
-                "- **文件**：依赖 `find42-core` 里的 `src/variants_generated.rs`"
-                "（本包不含该文件，但产出的二进制内嵌了它；机器生成，")
-        (pkg / name).write_text(out, encoding="utf-8")
+# 分发义务：Unicode-3.0 要求 notice 随副本或随附文档出现。
+# ⚠️ **NOTICE 全文由这里生成，上游许可正文从文件读**——先前是手抄 41 行，
+# 而同一份文件里 `upstream_copyright()` 的 docstring 写着「不要写死——写死过一次，
+# 年份就编错了一次」。那条教训当时只落实到了 1/41 行。
+UPSTREAM_LICENSE = (SRC / "LICENSE").read_text(encoding="utf-8").rstrip("\n")
+
+
+def notice_for(table_path: str, license_ref: str, extra_head: str = "") -> str:
+    return f"""# NOTICE — 第三方材料声明
+{extra_head}
+本项目代码以 MIT 许可发布（见 {license_ref}）。
+除此之外，产出的 `42find` 二进制中**内嵌了一份 Unicode 数据的衍生物**，
+其许可与代码不同，声明如下。
+
+## Unicode Han Database (Unihan)
+
+- **文件**：{table_path}
+- **来源**：<https://github.com/unicode-org/unihan-database>
+- **SPDX**：`Unicode-3.0`
+
+下面是**上游 `LICENSE` 的逐字照抄**，由 `scripts/gen-variants.py` 从文件读出写入。
+⚠️ 不要手改、不要转述——2026-09-06 的评审抓到过一次：
+版权年份被写成 `1991-2026`，上游实为 `2021-2026`。许可文本只能照抄。
+
+```
+{UPSTREAM_LICENSE}
+```
+
+> Unicode License V3 允许声明「随副本」**或**「随附文档」出现。
+> 本文件即那份随附文档；**分发二进制时必须一并带上它**。
+"""
+
+
+GEN_HEAD = ("\n> 本文件由 `scripts/gen-variants.py` 生成，路径已改写为 crate 视角。"
+            "**不要手改。**\n")
+(ROOT / "NOTICE").write_text(
+    notice_for("`src/42find-core/src/variants_generated.rs`（机器生成）",
+               "[`LICENSE`](LICENSE)"), encoding="utf-8")
+(PKGS[0] / "NOTICE").write_text(
+    notice_for("`src/variants_generated.rs`（机器生成）", "同目录的 `LICENSE`", GEN_HEAD),
+    encoding="utf-8")
+(PKGS[1] / "NOTICE").write_text(
+    notice_for("依赖 `find42-core` 里的 `src/variants_generated.rs`"
+               "（本包不含该文件，但产出的二进制内嵌了它）",
+               "同目录的 `LICENSE`", GEN_HEAD),
+    encoding="utf-8")
+# MIT 正文逐字复制，无需改写
+for pkg in PKGS:
+    (pkg / "LICENSE").write_text((ROOT / "LICENSE").read_text(encoding="utf-8"), encoding="utf-8")
 
 print(f"数据版本 unihan-database @ {rev}")
 if rev.endswith("-dirty"):
     print("  ⚠️ 数据 checkout 不干净——生成物无法由该 commit 复现，别拿它入库")
 for fn, n in per_field.items():
     print(f"  {fn.removesuffix('.txt'):<30} {n:>6} 条关系")
-print(f"  简→繁一对多分组（非对称承诺的范围）    {len(asym_groups):>6} 组")
 print(f"→ {OUT.relative_to(ROOT)}：{len(keys)} 个字符，"
       f"{sum(len(v) for v in clean.values())} 条展开关系，"
       f"{OUT.stat().st_size / 1024:.0f} KB")

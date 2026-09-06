@@ -11,6 +11,9 @@ if not UNIHAN.is_dir():
     sys.exit("缺 resources/unihan-database——先跑 clone.sh")
 
 def load(fn):
+    # ⚠️ `scripts/gen-variants.py` 里有一份同形实现，且**两者已漂移**：
+    # 这边 `m[src] = [...]`（后写覆盖），那边 `setdefault().extend()`（累加）。
+    # 当前数据下结果相同；上游同字段同字符出两行时会分岔。改一边要同步另一边。
     m = {}
     for line in (UNIHAN / fn).read_text(encoding="utf-8").splitlines():
         if line.startswith("#") or not line.strip():

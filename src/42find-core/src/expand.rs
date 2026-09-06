@@ -64,13 +64,30 @@ fn expand_char(c: char) -> Vec<char> {
         out.push(IDEOGRAPHIC_SPACE);
     }
 
+    // ⚠️ 必须并集，**不能 `else if`**：一个字可以同时是规范形与另一个字的变体。
+    // Unihan 里「裡」就是——`kTraditionalVariant` 指向自己、`kSimplifiedVariant` 指向「里」；
+    // 剥掉自指后 key 仍在，`else if` 会被前者短路，**静默吃掉反向映射**。
+    // 手写小表下不暴露（一个字要么是 key、要么在 value 里），换生成表那一刻就会现形。
+    // （`docs/experiments/exp002-unihan-coverage/` 实测：繁→简 20/27 → 21/27。）
+    //
+    // 并集**不破坏非对称**：`expand(發) = {發} ∪ 变体集{} ∪ 规范形{发}`，仍不含「髮」。
     if let Some(vs) = variants_of(c) {
         out.extend_from_slice(vs);
-    } else if let Some(canon) = canonical_of(c) {
+    }
+    if let Some(canon) = canonical_of(c) {
         out.push(canon); // 只回连规范形，兄弟变体不进来
     }
 
-    out.dedup();
+    // `Vec::dedup` 只去掉**相邻**重复；并集之后重复未必相邻，所以按出现顺序去重。
+    let mut seen = Vec::with_capacity(out.len());
+    out.retain(|ch| {
+        if seen.contains(ch) {
+            false
+        } else {
+            seen.push(*ch);
+            true
+        }
+    });
     out
 }
 

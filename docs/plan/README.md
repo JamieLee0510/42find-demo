@@ -6,4 +6,5 @@
 | 编号 | 日期 | 标题 |
 |------|------|------|
 | [001](001_normalization-design-decisions.md) | 2026-09-06 | 字符归一第一刀的四个技术选型 |
+| [002](002_unihan-table-generation.md) | 2026-09-06 | 把手写小表换成 Unihan 生成表（draft） |
 | — | 2026-09-06 | 簡繁与异体的映射数据从哪来 → 取舍卡见 `docs/research/001_variant-table-source/decision.md` |

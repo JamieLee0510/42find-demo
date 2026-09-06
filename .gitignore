@@ -40,3 +40,7 @@ target/
 
 # dev-launch 的评审 harness 配置：因机器而异，不入库共享
 .claude/dev-launch.review.md
+
+# 技能由 42plugin 安装，是指向本机绝对路径的符号链接（/Users/<你>/.42plugin/cache/...）。
+# 入库等于把用户名写进仓库，且换机器/CI 检出后全是断链。
+.claude/skills/

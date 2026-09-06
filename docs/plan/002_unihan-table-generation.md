@@ -4,7 +4,7 @@ number: "002"
 date: 2026-09-06
 title: 把手写小表换成 Unihan 生成表
 tags: [normalize, cjk, variant-table, codegen, license]
-status: draft
+status: draft（已开 issue #5 发车）
 related:
   - plan/001_normalization-design-decisions
   - research/001_variant-table-source
@@ -130,6 +130,8 @@ python3 scripts/gen-variants.py && git diff --exit-code src/42find-core/src/vari
 日韩汉字与假名 · 全半角（走整块偏移规则，不经变体表）。
 
 ## 相关
+
+**issue**：<https://github.com/JamieLee0510/42find-demo/issues/5>（照本蓝图执行，内部拆 5 个 PR）
 
 `plan/001_normalization-design-decisions` 决策三与三、四
 · `research/001_variant-table-source` 授权链与选型

@@ -155,3 +155,28 @@
 > → 非作者谱系只剩 OpenAI 一条。按 §7「双谱系不可降级为单评审」**停在这里**。
 >
 > ⚠️ 本轮踩的那个「假绿灯」已沉淀成记忆：`state/memory/20260906-管道退出码.md`。
+
+> ## 🔎 research/001：变体表数据源（2026-09-06 · `66e2412`）
+> 人改了出发点：**从本地检索工具出发，MIT 优先**。全文 `docs/research/001_variant-table-source/`。
+>
+> **命门 2、3 已实现，命门 1 是 P0。** 关键发现：`irg-kvariants`（charabia/Meilisearch 在用）
+> 的**数据层就是「字符 → 变体」关系表**——`KVariant{source, classification, destination}` +
+> `KVariantClass{Simplified, Old, Wrong, SementicVariant, Equal}`，多对一，
+> **按 destination 反转就得到「规范形 → 变体集」**，还自带分类能控哪几类参与展开。
+> 我起草命门时判断「现成的全是转换器，给不出等价关系」——**错在只看了 `convert()` 那一层**。
+>
+> **但授权链是断的**：crate 元数据写 MIT，`irg-kvariants/` 目录没有 LICENSE，
+> README 说数据来自 `hfhchan/irg` 的 `kVariants.md`，**那个仓看不到 LICENSE**。
+> 出路：换 **Unihan 一手**（Unicode License V3，声明放随附文档即可，与 MIT 无摩擦）。
+>
+> **「MIT 优先」几乎没花代价**——本地检索这条线上 MIT 就是主流
+> （tantivy · charabia · lindera · jieba-rs · cang-jie · character_converter 全 MIT；ripgrep 是 Unlicense OR MIT）。
+>
+> **最强反对依据**：Lucene（`ICUTransformFilter` + `CJKWidthFilter`）与 Meilisearch 都做**折叠**，
+> **没有一家做查询扩展**；且折叠在索引期更便宜（一个 term vs 多 term OR）。
+> 我们仍走查询扩展（偏移精确 + 非对称精确率），但**站在少数派一边，欠着一笔索引期的账**。
+>
+> **四个拍板点已列未代填**（见 `decision.md`）：数据源三选一 · 哪几类变体参与展开 ·
+> 索引期那笔账现在还是以后还 · 精确率补不补成第三个数。
+> **仍未补齐的那一处**：Unihan 那两个字段是 provisional，**真实语料覆盖率没有数**——该跑不该查，
+> 等 `vault/raw/` 放进真语料。

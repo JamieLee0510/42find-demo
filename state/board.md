@@ -227,3 +227,22 @@
 > `gemini` 免费层被停；`opencode` 只有 OpenAI + Anthropic，而 Anthropic 是作者谱系。
 > 按技能「双谱系不可降级为单评审」**停在这里**。
 > ⚠️ **本地已积 19 个提交，一个都没推。**
+
+> ## 🔧 codex 的真因：我诊断错了两次（2026-09-06）
+> 人问「codex CLI 为什么不能用」，回去核实，**前两次诊断都是错的**：
+> ① 「npm 缓存截断」——半对，清完缓存二进制确实落盘，但仍跑不起来。
+> ② 「macOS XProtect 在删它」——**错，是没证据的推断**（只凭「17:11 在、17:18 没了」）。
+> ③ ✅ **真因：签名证书被吊销。** `spctl -a -vv -t execute` 报 `CSSMERR_TP_CERT_REVOKED`。
+>    签名是真的（`Developer ID Application: OpenAI OpCo, LLC (2DC432GLL2)`，2026-04-25），
+>    但证书已吊销，macOS 拒绝执行。
+> **修法：装 latest。** 我全程在重装 `0.125.0`，而 npm latest 是 `0.153.4`——差 28 个小版本。
+> `@latest` 装完立刻输出 `codex-cli 0.153.4`。
+>
+> **两条教训，都写进 `.claude/dev-launch.review.md` 了**：
+> ① 二进制跑不起来，**先 `spctl -a -vv -t execute` 与 `codesign -dvvv` 各看一眼**，
+>    再去猜安装器/缓存/杀毒。签名与吊销状态是一句话问得出的事实，比推断便宜得多。
+> ② **别默认沿用现有版本号**——我一直在修一个上游早已修好的问题。
+>
+> **还差一步**：`codex exec` 报 401 `refresh_token_reused`（auth.json 是 5-09 的），
+> 要人跑 `codex login`（交互式）。登录后 GPT 系这条链就通了，
+> §7 只剩「第二条非 Anthropic 谱系」没着落。

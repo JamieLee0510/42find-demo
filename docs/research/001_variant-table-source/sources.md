@@ -92,9 +92,21 @@ bash .claude/skills/aias-meta-research/scripts/clone.sh https://github.com/BYVoi
 ⚠️ 技能文档里写的是 `skills/aias-meta-research/...`，**本仓的技能实际在 `.claude/skills/` 下**，
 `skills/` 目录里只有一份 README。照文档抄会 `No such file`。
 
-| 是什么 | 在哪 | 协议 | 角色 | 读多深 | 还活着吗 |
-|---|---|---|---|---|---|
-| （取材后填） | `resources/…` | | | | |
+### 实际读到的（2026-09-06，**未 clone，靠一手文档 + docs.rs 源码页 + 本机 `cargo info`**）
+
+| 是什么 | 在哪 | 协议 | 角色 | 读到哪一步 |
+|---|---|---|---|---|
+| **`irg-kvariants` 的数据结构** | [docs.rs 源码页](https://docs.rs/irg-kvariants/0.1.1/src/irg_kvariants/lib.rs.html) | 元数据 MIT，**数据层无 LICENSE** | 要比的 | **逐条**：`KVariant` 三字段、`KVariantClass` 五类、`include_bytes!` 构建期内嵌 |
+| **charabia 的 `ChineseNormalizer`** | [github.com/meilisearch/charabia](https://github.com/meilisearch/charabia) | MIT | 要学的 | 只读做法：按 `KVARIANTS` 归到 canonical，字符级 |
+| **`irg-kvariants/` 目录的授权** | [charabia/irg-kvariants](https://github.com/meilisearch/charabia/tree/main/irg-kvariants) | **无 LICENSE 文件** | 要比的 | 逐条：README 只写「wrapping hfhchan/irg 的 kVariants.md」 |
+| **`hfhchan/irg`（上游数据源）** | [github.com/hfhchan/irg](https://github.com/hfhchan/irg) | **看不到 LICENSE** | 要比的 | 一两行：这就是 P0 的来源 |
+| **Lucene ICU 分析器** | [analyzers-icu 概览](https://lucene.apache.org/core/8_11_4/analyzers-icu/overview-summary.html) | Apache-2.0 | 要学的 | 只读做法：`ICUTransformFilter(Traditional-Simplified)` + `CJKWidthFilter` |
+| **UAX #38 Unihan** | [unicode.org/reports/tr38](https://www.unicode.org/reports/tr38/) | Unicode License V3 | 要比的 | 逐条：`kSimplifiedVariant` / `kTraditionalVariant` 是 **provisional** |
+| **Unicode License V3** | [unicode.org/license.txt](https://www.unicode.org/license.txt) | — | 要比的 | 逐条：允许 use/copy/modify/distribute/sell，声明放随附文档即可 |
+| **11 个 crate 的许可** | 本机 `cargo info` | 见 `gap.md` 横向表 | 要比的 | 逐条：版本 + 许可字段 |
+
+⚠️ **`resources/` 仍是空的。** 本次没 clone——问题在**授权与数据形状**，一手文档和 docs.rs 的源码页就够答。
+真要写抽取脚本时再拉，那时拉的是 **Unihan 数据包**，不是这些 crate。
 
 ⚠️ **读懂 → 自己写，绝不复制粘贴。** GPL / AGPL 只参考不链接。
 ⚠️ **协议不只回答「能不能用」，还决定「能读到哪一步」。**

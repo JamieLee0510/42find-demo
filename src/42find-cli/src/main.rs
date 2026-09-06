@@ -28,7 +28,8 @@ const HELP: &str = "\
     （单个文件读不出来或不是 UTF-8 —— 跳过，不算错，不影响退出码）
 
 遍历：
-    递归时不跟随符号链接（与 rg 默认一致）；命令行上显式给出的路径仍然跟随。
+    递归时只收常规文件、不跟随符号链接（与 rg 默认一致）——FIFO / socket / 设备节点
+    会让读取永久阻塞。命令行上显式给出的路径仍然跟随。
 ";
 
 struct Args {
@@ -91,7 +92,7 @@ fn glob_matches(glob: Option<&str>, path: &Path) -> bool {
 
 /// 收集要搜的文件。返回是否一路顺利——有读不了的目录就是 `false`（决定退出码 2）。
 ///
-/// ⚠️ **递归时不跟随符号链接**（与 `rg` 默认一致）。跟随会让 `d/loop -> ..` 这类环
+/// ⚠️ **递归时只收常规文件，且不跟随符号链接**（与 `rg` 默认一致）。跟随会让 `d/loop -> ..` 这类环
 /// 把同一个文件反复收进来：实测一处命中被报 **32 次**（rg 报 1 次）。
 /// macOS 的 `PATH_MAX` 会让路径涨到千余字符后 `read_dir` 失败，所以表现不是卡死，
 /// 而是**静默重复**——更隐蔽，且会直接污染 `scripts/bench.sh` 的召回与精确。
@@ -123,11 +124,17 @@ fn collect(path: &Path, glob: Option<&str>, out: &mut Vec<PathBuf>) -> bool {
     }
     children.sort();
     for child in children {
-        // 符号链接一律不进——判的是链接自身，不是它指向的东西
+        // 判的是链接自身，不是它指向的东西
         match std::fs::symlink_metadata(&child) {
+            // 符号链接一律不进（递归不跟随）
             Ok(md) if md.is_symlink() => continue,
+            // ⚠️ 只收**常规文件**与目录。FIFO / socket / 设备节点匹配到 glob 时，
+            // 后面的 `read_to_string` 会**永久阻塞**——实测拿 mkfifo 造一个 `pipe.txt`，
+            // 进程 6 秒不返回，只能强杀。
+            Ok(md) if !md.is_file() && !md.is_dir() => continue,
             Ok(_) => {}
-            Err(_) => {
+            Err(e) => {
+                eprintln!("42find: 读不了 {}：{e}", child.display());
                 ok = false;
                 continue;
             }
@@ -220,6 +227,30 @@ mod tests {
             "环下同一个文件被收了 {} 次：{files:?}",
             files.len()
         );
+    }
+
+    /// 非常规文件（socket / FIFO / 设备节点）必须跳过——`read_to_string` 在它们上会**永久阻塞**。
+    ///
+    /// 实测：用 `mkfifo` 造一个匹配 glob 的 `pipe.txt`，改之前进程 6 秒不返回、只能强杀。
+    /// 这里用 `UnixListener` 造 socket，因为 std 没有 mkfifo，而造 FIFO 就得引依赖
+    /// （`find42-cli` 也该保持零第三方依赖）。两者走的是同一条判断。
+    #[test]
+    fn 非常规文件被跳过() {
+        let dir = std::env::temp_dir().join(format!("42find-sock-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("建目录");
+        std::fs::write(dir.join("real.txt"), "检索\n").expect("写文件");
+        let sock = dir.join("s.txt");
+        let _ = std::fs::remove_file(&sock);
+        let listener = std::os::unix::net::UnixListener::bind(&sock).expect("建 socket");
+
+        let mut files = Vec::new();
+        collect(&dir, Some("*.txt"), &mut files);
+
+        drop(listener);
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(files.len(), 1, "socket 不该被当成待搜文件：{files:?}");
+        assert!(files[0].ends_with("real.txt"));
     }
 
     #[test]

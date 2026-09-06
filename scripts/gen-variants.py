@@ -13,6 +13,9 @@ import re, pathlib, subprocess, sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SRC = ROOT / "resources/unihan-database"
 OUT = ROOT / "src/42find-core/src/variants_generated.rs"
+# `cargo package` 只带 package 目录里的文件，根目录的 NOTICE / LICENSE 到不了
+# Cargo 消费者手里。这两份由脚本机器同步，不手抄——手抄就会走样（已走样过一次）。
+PKG = ROOT / "src/42find-core"
 
 # exp002 模式 B。顺序不影响结果（最终取并集），按规模排便于阅读。
 FIELDS = [
@@ -134,6 +137,12 @@ lines += ["    " + ", ".join(rs_str("".join(clean[c])) for c in keys[i:i + 4]) +
 lines += ["];", ""]
 
 OUT.write_text("\n".join(lines), encoding="utf-8")
+
+# 分发义务：Unicode-3.0 要求 notice 随副本或随附文档出现
+for name in ("NOTICE", "LICENSE"):
+    src_file = ROOT / name
+    if src_file.is_file():
+        (PKG / name).write_text(src_file.read_text(encoding="utf-8"), encoding="utf-8")
 
 print(f"数据版本 unihan-database @ {rev}")
 if rev.endswith("-dirty"):

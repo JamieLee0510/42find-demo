@@ -3,6 +3,8 @@
   "name": "42find",
   "version": "0.1.0",
   "description": "42find · 本地全文检索工具",
-  "license": "MIT",
-  "keywords": ["aias"]
+  "license": "MIT AND Unicode-3.0",
+  "keywords": [
+    "aias"
+  ]
 }

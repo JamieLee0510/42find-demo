@@ -11,9 +11,10 @@ members  = [
 
 [workspace.package]
 edition = "2024"
-# 代码是 MIT。⚠️ 二进制里还内嵌了 Unihan 数据的衍生物（Unicode License V3），
-# 声明见根目录 `NOTICE`——分发二进制时必须一并带上。
-license = "MIT"
+# 代码是 MIT；`find42-core` 里入库的 variants_generated.rs 是 Unihan 数据的衍生物。
+# Cargo 的 license 是**整个 package 的**许可，不是「仅代码」，所以必须是复合式——
+# 只写 MIT 会对 Cargo 消费者错误声明。完整文本见根目录 `NOTICE`。
+license = "MIT AND Unicode-3.0"
 
 [workspace.lints.clippy]
 # CI 闸门第二条要真的有牙齿：警告即失败。

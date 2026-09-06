@@ -7,9 +7,9 @@
 //   已剥离自指条目（unihan-database#408）。**不做传递闭包**——
 //   exp002 实测两跳修不好任何样本，还打破非对称。
 //
-// Copyright © 1991-2026 Unicode, Inc. All rights reserved.
-// Distributed under the Terms of Use in https://www.unicode.org/copyright.html
-// Licensed under the Unicode License V3; 本表是该数据的衍生物。
+// Copyright © 2021-2026 Unicode, Inc.
+// Licensed under the Unicode License V3 (SPDX: Unicode-3.0)；本表是该数据的衍生物。
+// 完整许可文本见仓库根目录 NOTICE（上游 LICENSE 的逐字照抄）。
 //
 // ⚠️ kSimplifiedVariant / kTraditionalVariant 在 UAX #38 里是 provisional 字段。
 

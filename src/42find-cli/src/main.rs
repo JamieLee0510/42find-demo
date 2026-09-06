@@ -108,10 +108,20 @@ fn collect(path: &Path, glob: Option<&str>, out: &mut Vec<PathBuf>) -> bool {
         eprintln!("42find: 读不了目录：{}", path.display());
         return false;
     };
-    let mut children: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
-    children.sort();
-
+    // 不能用 `entries.flatten()`——它会**静默丢掉** ReadDir 迭代途中的 Err，
+    // 于是「目录读不了 → rc=2 + stderr」这条契约在部分枚举错误下失效。
     let mut ok = true;
+    let mut children: Vec<PathBuf> = Vec::new();
+    for entry in entries {
+        match entry {
+            Ok(e) => children.push(e.path()),
+            Err(e) => {
+                eprintln!("42find: 枚举 {} 时出错：{e}", path.display());
+                ok = false;
+            }
+        }
+    }
+    children.sort();
     for child in children {
         // 符号链接一律不进——判的是链接自身，不是它指向的东西
         match std::fs::symlink_metadata(&child) {

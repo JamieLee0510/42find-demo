@@ -4,7 +4,7 @@ number: "002"
 date: 2026-09-06
 title: 把手写小表换成 Unihan 生成表
 tags: [normalize, cjk, variant-table, codegen, license]
-status: draft（已开 issue #5 发车）
+status: done（五步全落地、六条验收全过；§7 双谱系评审仍卡在 harness）
 related:
   - plan/001_normalization-design-decisions
   - research/001_variant-table-source
@@ -68,6 +68,14 @@ related:
 它是一次纯粹的「把地雷拆掉」，混在换表里做就分不清是谁的错了。
 并集**不破坏非对称**：`expand(發) = {發} ∪ 变体集{} ∪ 规范形{发}`，仍不含 `髮`
 （`exp002` 已实测，`src/42find-core/src/lib.rs` 的两条钉子测试守着）。
+
+> **落地时偏离本步一处**：原写「输出两张表（规范形→变体集 · 变体→规范形）」，
+> 实际做成**一张合并表**。理由：exp002 已实测并集不破坏非对称——非对称在数据里
+> （简→繁一对多、繁→简多对一），不在代码结构里。两张表只是把同一次并集拆开写，
+> 反而给「两次查找用 `else if` 会短路」那类 bug 留了门。
+> **副作用**：这个简化让步骤 1（PR-1）的并集改动变得多余（它是按两张表设计的）。
+> PR-1 没白做——它的**去重修正**留下了，也验证了行为零变化——但要诚实记一笔：
+> **换个设计就能消掉的 bug，比修掉它更好。**
 
 ### 2 · 生成脚本 `scripts/gen-variants.py`
 

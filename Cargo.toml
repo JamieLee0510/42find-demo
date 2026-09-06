@@ -11,6 +11,8 @@ members  = [
 
 [workspace.package]
 edition = "2024"
+# 代码是 MIT。⚠️ 二进制里还内嵌了 Unihan 数据的衍生物（Unicode License V3），
+# 声明见根目录 `NOTICE`——分发二进制时必须一并带上。
 license = "MIT"
 
 [workspace.lints.clippy]

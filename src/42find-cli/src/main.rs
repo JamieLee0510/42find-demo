@@ -24,7 +24,11 @@ const HELP: &str = "\
     路径:行[:字节列]:命中的原文
 
 退出码：
-    0 有命中 · 1 无命中 · 2 参数或读取出错
+    0 有命中 · 1 无命中 · 2 参数错误，或给定路径读不了
+    （单个文件读不出来或不是 UTF-8 —— 跳过，不算错，不影响退出码）
+
+遍历：
+    递归时不跟随符号链接（与 rg 默认一致）；命令行上显式给出的路径仍然跟随。
 ";
 
 struct Args {
@@ -85,19 +89,42 @@ fn glob_matches(glob: Option<&str>, path: &Path) -> bool {
     }
 }
 
-fn collect(path: &Path, glob: Option<&str>, out: &mut Vec<PathBuf>) {
-    if path.is_dir() {
-        let Ok(entries) = std::fs::read_dir(path) else {
-            return;
-        };
-        let mut children: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
-        children.sort();
-        for child in children {
-            collect(&child, glob, out);
+/// 收集要搜的文件。返回是否一路顺利——有读不了的目录就是 `false`（决定退出码 2）。
+///
+/// ⚠️ **递归时不跟随符号链接**（与 `rg` 默认一致）。跟随会让 `d/loop -> ..` 这类环
+/// 把同一个文件反复收进来：实测一处命中被报 **32 次**（rg 报 1 次）。
+/// macOS 的 `PATH_MAX` 会让路径涨到千余字符后 `read_dir` 失败，所以表现不是卡死，
+/// 而是**静默重复**——更隐蔽，且会直接污染 `scripts/bench.sh` 的召回与精确。
+/// 命令行上**显式给出**的路径仍然跟随（下面的 `is_dir()` 用的是跟随语义）。
+fn collect(path: &Path, glob: Option<&str>, out: &mut Vec<PathBuf>) -> bool {
+    if !path.is_dir() {
+        if glob_matches(glob, path) {
+            out.push(path.to_owned());
         }
-    } else if glob_matches(glob, path) {
-        out.push(path.to_owned());
+        return true;
     }
+
+    let Ok(entries) = std::fs::read_dir(path) else {
+        eprintln!("42find: 读不了目录：{}", path.display());
+        return false;
+    };
+    let mut children: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+    children.sort();
+
+    let mut ok = true;
+    for child in children {
+        // 符号链接一律不进——判的是链接自身，不是它指向的东西
+        match std::fs::symlink_metadata(&child) {
+            Ok(md) if md.is_symlink() => continue,
+            Ok(_) => {}
+            Err(_) => {
+                ok = false;
+                continue;
+            }
+        }
+        ok &= collect(&child, glob, out);
+    }
+    ok
 }
 
 fn main() -> ExitCode {
@@ -115,8 +142,15 @@ fn main() -> ExitCode {
 
     let exp = find42_core::expand(&args.query);
     let mut files = Vec::new();
+    let mut ok = true;
     for p in &args.paths {
-        collect(p, args.glob.as_deref(), &mut files);
+        // 显式给的路径不存在，是参数错误，不是「无命中」
+        if !p.exists() {
+            eprintln!("42find: 路径不存在：{}", p.display());
+            ok = false;
+            continue;
+        }
+        ok &= collect(p, args.glob.as_deref(), &mut files);
     }
 
     let mut found = false;
@@ -135,9 +169,64 @@ fn main() -> ExitCode {
         }
     }
 
-    if found {
+    // 读不了的路径优先于「无命中」——它是错误，不该伪装成搜完了没找到
+    if !ok {
+        ExitCode::from(2)
+    } else if found {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(1)
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    /// 造一个自己指向父目录的符号链接环，确认 `collect` 不会把同一个文件反复收进来。
+    ///
+    /// 这是评审抓到的 P1：改之前，环下同一处命中被报 **32 次**（`rg` 报 1 次）。
+    /// 表现不是卡死——macOS 的 `PATH_MAX` 会让路径涨到千余字符后 `read_dir` 失败，
+    /// 于是变成**静默重复**，直接污染 `scripts/bench.sh` 的召回与精确。
+    #[test]
+    fn 符号链接环不会重复收集() {
+        let dir = std::env::temp_dir().join(format!("42find-symlink-{}", std::process::id()));
+        let sub = dir.join("d");
+        std::fs::create_dir_all(&sub).expect("建目录");
+        std::fs::write(sub.join("x.txt"), "检索\n").expect("写文件");
+        let link = sub.join("loop");
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink("..", &link).expect("建符号链接");
+
+        let mut files = Vec::new();
+        let ok = collect(&dir, Some("*.txt"), &mut files);
+
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert!(ok, "正常目录不该报读取失败");
+        assert_eq!(
+            files.len(),
+            1,
+            "环下同一个文件被收了 {} 次：{files:?}",
+            files.len()
+        );
+    }
+
+    #[test]
+    fn 符号链接本身不被当成待搜文件() {
+        let dir = std::env::temp_dir().join(format!("42find-symlink2-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("建目录");
+        std::fs::write(dir.join("real.txt"), "检索\n").expect("写文件");
+        let link = dir.join("alias.txt");
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink("real.txt", &link).expect("建符号链接");
+
+        let mut files = Vec::new();
+        collect(&dir, Some("*.txt"), &mut files);
+
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(files.len(), 1, "链接指向的文件不该被搜两遍：{files:?}");
+        assert!(files[0].ends_with("real.txt"));
     }
 }

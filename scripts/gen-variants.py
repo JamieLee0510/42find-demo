@@ -68,8 +68,20 @@ for k, vs in table.items():
         clean[k] = uniq
 
 keys = sorted(clean)                       # 排序是二分查找的前提
-rev = subprocess.run(["git", "-C", str(SRC), "rev-parse", "--short", "HEAD"],
-                     capture_output=True, text=True).stdout.strip() or "unknown"
+def data_rev():
+    """记数据版本。**必须连 dirty 一起记**——只记 HEAD 的话，本地改过 Unihan 文件
+    生成出来的表，头部会写着一个复现不出它的 commit；而「重跑生成器 git diff 为空」
+    这条验收在同一个 dirty checkout 上照样通过，查不出来。"""
+    def git(*a):
+        return subprocess.run(["git", "-C", str(SRC), *a],
+                              capture_output=True, text=True).stdout.strip()
+    rev = git("rev-parse", "--short", "HEAD") or "unknown"
+    if git("status", "--porcelain"):
+        rev += "-dirty"
+    return rev
+
+
+rev = data_rev()
 
 
 def rs_char(c):
@@ -114,6 +126,8 @@ lines += ["];", ""]
 OUT.write_text("\n".join(lines), encoding="utf-8")
 
 print(f"数据版本 unihan-database @ {rev}")
+if rev.endswith("-dirty"):
+    print("  ⚠️ 数据 checkout 不干净——生成物无法由该 commit 复现，别拿它入库")
 for fn, n in per_field.items():
     print(f"  {fn.removesuffix('.txt'):<30} {n:>6} 条关系")
 print(f"→ {OUT.relative_to(ROOT)}：{len(keys)} 个字符，"

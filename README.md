@@ -59,3 +59,7 @@ bash scripts/check-tools.sh --mirrors  # 装不上时的国内镜像
 这份 README 是给人看的门面：README 说这是什么，`CLAUDE.md` 说该怎么干。
 
 *由 `aias-meta-init` 生成于 2026-09-05。*
+
+## 许可
+
+代码 MIT（见 `LICENSE`）。二进制里内嵌了 **Unicode Han Database (Unihan)** 数据的衍生物，适用 **Unicode License V3**——声明见根目录 [`NOTICE`](NOTICE)，**分发二进制时必须一并带上**。

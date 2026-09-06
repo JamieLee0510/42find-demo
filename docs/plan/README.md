@@ -5,3 +5,4 @@
 
 | 编号 | 日期 | 标题 |
 |------|------|------|
+| — | 2026-09-06 | 簡繁与异体的映射数据从哪来 → 取舍卡见 `docs/research/001_variant-table-source/decision.md` |

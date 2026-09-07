@@ -1,0 +1,55 @@
+# 黄金查询集 — 「这个词该搜出这几处」的固定答案
+# 每行：查询<TAB>期望命中（文件:行:字节列，逗号分隔，无命中写 -）<TAB>说明
+# 列是 **1-based 字节列**，与 rg --column 同单位——否则跟基线对不上，召回率就是假的。
+# corpus-sum: 96cded543529
+#
+# ⚠️ 本行的算法必须与 scripts/bench.sh 完全一致：
+#   `cat vault/truth/corpus/*.txt | shasum -a 256 | cut -c1-12`（按文件名序拼接，只含 *.txt）
+#   2026-09-06 两条谱系同时抓到：这个值从写下那一刻就是错的（我用 Python 按内容排序拼接），
+#   于是哨兵**每次运行都误报**「语料已变」——建了一道检查，然后它一直在空转。
+# ⚠️ 语料一改，**全部**期望值都要重算——不只是新加的那些。
+#   2026-09-06 踩过：只算了新的 20 条，旧 15 条在新语料里命中了不在期望里的处所，
+#   精确率从 100% 掉到 83%，看着像 bug，其实是期望值过期。
+#
+# ★陷阱：该写法**在语料里但不在期望里**——它是范围外的（地区词/用字习惯）。
+#   谁哪天让 42find 命中它，精确率就掉，闸门会抓住。这是有意留的。
+# ⚠️ 已知漏：在承诺范围内但当前找不到。召回率因此不是 100%——那是真数，不修饰。
+# ⚠️ 重叠命中口径：42find 允许重叠，bench.sh 的 rg 基线用 -o（不重叠）。
+#   当前 34 条查询里没有会重叠的用例，所以两边一致；**一旦加入重叠查询，两个数会分歧**。
+#   （2026-09-06 DeepSeek 评审 P3-b 指出。不改口径，因为改了就与本文件已有的期望值冲突；
+#   加重叠查询之前必须先决定口径。）
+
+检索	01-simplified.txt:2:16,02-traditional.txt:2:16,06-inline.txt:1:13,06-inline.txt:1:31,06-inline.txt:2:16,08-real-simplified.txt:1:1,09-real-traditional.txt:1:1	簡繁互查：简体查繁体
+檢索	01-simplified.txt:2:16,02-traditional.txt:2:16,06-inline.txt:1:13,06-inline.txt:1:31,06-inline.txt:2:16,08-real-simplified.txt:1:1,09-real-traditional.txt:1:1	簡繁互查：繁体查简体
+归一	01-simplified.txt:2:25,02-traditional.txt:2:25,06-inline.txt:1:4,06-inline.txt:1:40	簡繁互查：另一组字
+变体表	01-simplified.txt:2:34,02-traditional.txt:2:34	簡繁互查：三字词
+query	03-width.txt:1:10,03-width.txt:2:10	全半角归一：半角查全角
+ｑｕｅｒｙ	03-width.txt:1:10,03-width.txt:2:10	全半角归一：全角查半角
+TSV	03-width.txt:3:16,03-width.txt:3:30	全半角归一：大写，且同行混排
+发	04-one-to-many.txt:1:19,04-one-to-many.txt:1:28,04-one-to-many.txt:1:37,04-one-to-many.txt:1:49,04-one-to-many.txt:2:22,04-one-to-many.txt:2:31,04-one-to-many.txt:2:49,08-real-simplified.txt:1:52,08-real-simplified.txt:1:58,09-real-traditional.txt:1:52,09-real-traditional.txt:1:58,10-out-of-scope.txt:2:37	一对多：简体规范形展开全部变体
+發	04-one-to-many.txt:1:19,04-one-to-many.txt:1:28,04-one-to-many.txt:1:37,04-one-to-many.txt:1:49,04-one-to-many.txt:2:22,04-one-to-many.txt:2:31,08-real-simplified.txt:1:52,08-real-simplified.txt:1:58,09-real-traditional.txt:1:58,10-out-of-scope.txt:2:37	★钉子：繁体变体**不得**命中兄弟变体「髮」
+髮	04-one-to-many.txt:1:19,04-one-to-many.txt:1:28,04-one-to-many.txt:1:37,04-one-to-many.txt:1:49,04-one-to-many.txt:2:49,08-real-simplified.txt:1:52,08-real-simplified.txt:1:58,09-real-traditional.txt:1:52	★钉子：同上，反向
+户	05-variant.txt:1:13,05-variant.txt:1:25,05-variant.txt:2:16,05-variant.txt:2:28,08-real-simplified.txt:3:25,09-real-traditional.txt:4:25	异体字
+戶	05-variant.txt:1:13,05-variant.txt:1:25,05-variant.txt:2:16,05-variant.txt:2:28,08-real-simplified.txt:3:25,09-real-traditional.txt:4:25	异体字反向
+the quick	07-outside-table.txt:1:19	表外字符：纯 ASCII 原样匹配
+42	07-outside-table.txt:2:19	表外字符：数字原样匹配
+ひらがな	07-outside-table.txt:3:16	表外字符：假名原样，本刀不做假名归一
+数据库	08-real-simplified.txt:1:19,09-real-traditional.txt:1:19	★陷阱：語料有「資料庫」，地区词不该中
+网络	08-real-simplified.txt:1:31,09-real-traditional.txt:1:31	★陷阱：語料有「網路」，地区词不该中
+软件	08-real-simplified.txt:1:40,09-real-traditional.txt:1:40	★陷阱：語料有「軟體」，地区词不该中
+头发	04-one-to-many.txt:1:46,04-one-to-many.txt:2:46,08-real-simplified.txt:1:49,09-real-traditional.txt:1:49	一对多：发→發/髮
+发布	04-one-to-many.txt:1:28,08-real-simplified.txt:1:58,09-real-traditional.txt:1:58	★陷阱：語料有「發佈」，布/佈 不在 Unihan 任何变体字段
+干净	08-real-simplified.txt:2:13,09-real-traditional.txt:2:13	⚠️ 已知漏：净→凈→淨 隔两跳，本刀不开两跳
+后台	08-real-simplified.txt:2:22,09-real-traditional.txt:2:22	一对多：后→後/后
+里面	08-real-simplified.txt:2:31,09-real-traditional.txt:2:31,09-real-traditional.txt:3:16	一简对两繁
+台湾	08-real-simplified.txt:2:40,09-real-traditional.txt:2:40,09-real-traditional.txt:3:25	一对多：台→臺/台
+面条	08-real-simplified.txt:2:49,09-real-traditional.txt:2:49	一对多：面→麵/面
+系统	08-real-simplified.txt:3:13,09-real-traditional.txt:4:13	一对多：系→係/繫/系
+用户	08-real-simplified.txt:3:22,09-real-traditional.txt:4:22	异体字：户/戶
+冲突	08-real-simplified.txt:3:31,09-real-traditional.txt:4:31	一对多：冲→沖/衝
+划分	08-real-simplified.txt:3:40,09-real-traditional.txt:4:40	一对多：划→劃/划
+复制	08-real-simplified.txt:3:49,09-real-traditional.txt:4:49	一对多：复→復/複/覆
+历史	08-real-simplified.txt:4:10,09-real-traditional.txt:5:10	一对多：历→歷/曆
+制作	08-real-simplified.txt:4:19,09-real-traditional.txt:5:19	一对多：制→製/制
+钟表	08-real-simplified.txt:4:28,09-real-traditional.txt:5:28	两字都一对多
+只有	04-one-to-many.txt:1:7,08-real-simplified.txt:4:37,09-real-traditional.txt:5:37	只→隻/只

@@ -37,3 +37,13 @@ node_modules/
 # Rust 构建产物（属于第六组「过程材料」：扔的，不入库）
 # ⚠️ Cargo.lock **要入库**——这是一个出二进制的项目，锁文件是「装的是不是同一个版本」的另一半。
 target/
+
+# dev-launch 的评审 harness 配置：因机器而异，不入库共享
+.claude/dev-launch.review.md
+
+# 技能由 42plugin 安装，是指向本机绝对路径的符号链接（/Users/<你>/.42plugin/cache/...）。
+# 入库等于把用户名写进仓库，且换机器/CI 检出后全是断链。
+.claude/skills/
+
+# pr-ready 的工作产物：当前 diff 的快照与 audit 笔记，随时可重生成
+.claude/notes/

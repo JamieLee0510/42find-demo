@@ -81,41 +81,69 @@ fn match_at(exp: &Expansion, line: &str, start: usize) -> Option<usize> {
     Some(end)
 }
 
-/// 扫一行。允许重叠命中（与 `vault/truth/queries.tsv` 的计数口径一致）。
+/// 扫一行，**惰性**产出命中。允许重叠命中（与 `vault/truth/queries.tsv` 的计数口径一致）。
 ///
 /// 按**字节列升序**产出。
-#[must_use]
-pub fn search_line<'a>(exp: &Expansion, lineno: usize, line: &'a str) -> Vec<Match<'a>> {
-    if exp.is_empty() {
-        return Vec::new();
-    }
-    line.char_indices()
-        .filter_map(|(i, _)| {
-            match_at(exp, line, i).map(|end| Match {
-                line: lineno,
-                col: i + 1,
-                byte_len: end - i,
-                line_text: line,
-            })
+///
+/// ⚠️ 返回迭代器而不是 `Vec`：一个 200 MB 的单行文件能产出两亿个 `Match`，
+/// 物化一遍就是 8 GB。调用方多半只需要顺序走一遍（输出）或问一句「有没有」。
+///
+/// ⚠️ **`exp` 与 `line` 用两个生命周期**：`Match` 只借 `line`，不借 `exp`。
+/// 写成一个 `'a` 会把它们统一，于是 `search(&expand(q), text).collect()` 这种
+/// 「展开式是临时值、命中要留下来」的自然写法编译不过。
+pub fn search_line<'e, 't>(
+    exp: &'e Expansion,
+    lineno: usize,
+    line: &'t str,
+) -> impl Iterator<Item = Match<'t>> + use<'e, 't> {
+    // 空展开必须挡在这里：`match_at` 对空 classes 会在每个位置返回 `Some(start)`，
+    // 于是每个字符都变成一处长度为 0 的「命中」。
+    let empty = exp.is_empty();
+    line.char_indices().filter_map(move |(i, _)| {
+        if empty {
+            return None;
+        }
+        match_at(exp, line, i).map(|end| Match {
+            line: lineno,
+            col: i + 1,
+            byte_len: end - i,
+            line_text: line,
         })
-        .collect()
+    })
 }
 
-/// 扫整段文本。
+/// 扫整段文本，**惰性**产出命中。
 ///
 /// **按 (行号, 字节列) 升序产出。** 这是写下来的契约，不是实现细节——
 /// `42find-cli` 的 `emit` 不带 `--column` 时按行去重，哨兵只跟**上一行**比，
 /// 靠的就是这条。判据住在提供保证的这一头，不住在用它的那一头
 /// （钉子测试 `命中按行号与字节列升序产出`）。
 ///
+/// ⚠️ **只按 `\n` 切行，`\r` 留在 `line_text` 里。** 不能用 `str::lines()`——
+/// 它会把行尾的 `\r` 吃掉，于是 CRLF 文件吐出来的「整行」**不是原文的字节**，
+/// 而 `rg` 是原样保留的。本层的承诺是「不改语料」，剥掉一个字节也是改。
+///
 /// ⚠️ **`Match` 借的是传进来的 `text`**，所以调用方必须把整段文本留到命中用完为止。
 /// 今天 `42find-cli` 是 `read_to_string` 整文件读入——**日后要改成逐行流式读，
 /// 必须和这里的借用设计一起改**，否则 `line_text` 的生命周期挂在一个已经不存在的
 /// `String` 上，编译期就会挡住，别到那时才发现是设计冲突。
-#[must_use]
-pub fn search<'a>(exp: &Expansion, text: &'a str) -> Vec<Match<'a>> {
-    text.lines()
+pub fn search<'e, 't>(
+    exp: &'e Expansion,
+    text: &'t str,
+) -> impl Iterator<Item = Match<'t>> + use<'e, 't> {
+    // 文本以 `\n` 结尾时 `split` 会多出一个空尾巴——它产不出命中，无需特判。
+    text.split('\n')
         .enumerate()
-        .flat_map(|(i, line)| search_line(exp, i + 1, line))
-        .collect()
+        .flat_map(move |(i, line)| search_line(exp, i + 1, line))
+}
+
+/// 这段文本里**有没有**命中。
+///
+/// 给「只需要知道有没有」的场合用（如含 NUL 的文件只报一行、不打印内容）。
+/// 走的是同一条惰性通路，命中一处就停——**不物化任何东西**。
+/// 先前那里是 `search(..).is_empty()`，一个 200 MB 的单行文件会为了打印一句话
+/// 先建出两亿个 `Match`。
+#[must_use]
+pub fn has_match(exp: &Expansion, text: &str) -> bool {
+    search(exp, text).next().is_some()
 }

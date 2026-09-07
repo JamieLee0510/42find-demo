@@ -40,7 +40,8 @@ const HELP: &str = "\
     不带 --column：**一个匹配行只输出一行**（同行多处命中不重复报）
     带  --column：**每处命中输出一行**，由字节列区分同一行上的多处命中
 
-    ⚠️ 整行默认截到 512 字节。`--column` 下每处命中各写一遍整行，而同一行的命中数
+    ⚠️ 整行默认截到 512 字节，截断处标注 `… [整行 N 字节，已截断至 M]`
+    ——**这个标注是本工具自己的，不是 rg 的格式**（rg 的 `-M` 是整行换成一句话）。`--column` 下每处命中各写一遍整行，而同一行的命中数
     正比于行长——不截的话输出量对行长呈**平方**：一个 10 KB 的单行文件（minified
     js/json、单行 csv、老 Mac 的 CR 换行文本都是「一行」）查一个常见字，
     输出就是 106 MB。要原样整行用 `--max-columns 0`。
@@ -48,6 +49,8 @@ const HELP: &str = "\
     含 NUL 字节的文件默认只报一行「二进制文件有命中」、不打印内容（与 rg 同）。
     整行输出会把被搜文件里的 ANSI / OSC 控制字节原样送进终端，而 OSC 序列能改
     终端标题、甚至写剪贴板。要照搜用 `--text`。
+    ⚠️ NUL 只是**部分**防线：不含 NUL 的控制字节照样原样输出（与 rg 同）。
+    ⚠️ `--text` 只放宽 NUL 这一条，**不放开非 UTF-8**——那类文件仍然跳过（见下）。
 
     文件开头的 UTF-8 BOM 会被剥掉再扫（与 rg 同），否则第一行的字节列会恒偏 3。
 
@@ -55,11 +58,14 @@ const HELP: &str = "\
     0 有命中 · 1 无命中 · 2 参数错误，或给定路径读不了／不是常规文件
     （空查询词是参数错误，不当作「匹配所有行」）
     （单个文件**不是 UTF-8** —— 跳过，不算错；**权限拒绝或 IO 错误** —— 报到 stderr 并退 2）
-    （下游关掉管道，如 `| head` —— **立即停止**，仍退 0 / 1，不 panic；与 rg 一致。
-      注意：就此停下之后，尚未检查的文件不再计入退出码）
-    （标准输出真的写失败，如磁盘满或 EIO —— 报到 stderr 并退 2，不静默成 0。
-      ⚠️ 关掉 fd 1 不属此列：Rust 启动时会把已关闭的 0/1/2 补成 /dev/null，写不会失败。
-      磁盘／配额写满也不属此列：SIGXFSZ 在 write 返回之前就把进程打死了，退 153）
+    （下游关掉管道，如 `| head` —— **尽早停止**，不 panic，**沿用本来该退的码**；与 rg 一致。
+      注意两点：① 输出攒在缓冲里时，断管要到 flush 才发现，在那之前的文件照常读完；
+      ② 就此停下之后尚未检查的文件不再计入退出码。所以这里可能是 0 / 1，
+      也可能是 2 —— 前面已经有路径读不了时，那个错误优先）
+    （标准输出真的写失败，如 EIO —— 报到 stderr 并退 2，不静默成 0。
+      ⚠️ 两个像是「写失败」但到不了这里的：关掉 fd 1（Rust 启动时会把已关闭的 0/1/2
+      补成 /dev/null，写不会失败）；磁盘／配额写满（SIGXFSZ 在 write 返回之前
+      就把进程打死了，退 153））
 
 遍历：
     递归时只收常规文件、不跟随符号链接（与 rg 默认一致）——FIFO / socket / 设备节点
@@ -329,11 +335,16 @@ fn write_hit(
 ///
 /// 输出的是**整行**，不是命中的那一段：只把用户自己敲的那个词还给他，
 /// 等于还得再打开文件才知道那句话在说什么。形态对齐 `rg`，不自创。
-fn emit(
+///
+/// `matches` 是**惰性**迭代器，不物化——单行大文件能产出上亿处命中。
+/// `found` 用 `&mut` 传进来而不是返回：写失败时得保住「已经看到过命中」这个事实，
+/// 否则一处命中写到一半断管道，退出码会从 0 掉成 1。
+fn emit<'a>(
     out: &mut impl Write,
     file: &Path,
     args: &Args,
-    matches: &[find42_core::Match<'_>],
+    matches: impl Iterator<Item = find42_core::Match<'a>>,
+    found: &mut bool,
 ) -> std::io::Result<()> {
     // 路径在整个循环里是常量。`Path::display()` 每次都要走一遍 lossy UTF-8 分块，
     // 塞进 `write!` 就是每行重做一次——清理评审实测 57,400 行时占 4.5 ms，提出来省一半。
@@ -345,7 +356,8 @@ fn emit(
         // ⚠️ **这一支不能改成按行去重**：`scripts/bench.sh` 量 42find 走的正是 `--column`，
         // 34 条黄金查询集的分母就是逐命中数，去重会把召回与精确一起改掉。
         for m in matches {
-            write_hit(out, &name, m, true, args.max_columns)?;
+            *found = true;
+            write_hit(out, &name, &m, true, args.max_columns)?;
         }
         return Ok(());
     }
@@ -358,9 +370,10 @@ fn emit(
     // 判据住在提供它的一头，不住在用它的一头。
     let mut printed = 0usize; // 0 不是合法行号，拿来当「还没输出过任何一行」
     for m in matches {
+        *found = true;
         if m.line() != printed {
             printed = m.line();
-            write_hit(out, &name, m, false, args.max_columns)?;
+            write_hit(out, &name, &m, false, args.max_columns)?;
         }
     }
     Ok(())
@@ -377,6 +390,9 @@ fn emit(
 ///（见上面 `Origin` 那段注释）。这里第一版就是那个形状：`exit_code` 判一次、
 /// `main` 里决定要不要告警时又原地判了一次——两条清理视角同时点了名。
 fn is_fatal_write_err(kind: std::io::ErrorKind) -> bool {
+    // 为什么只排 `BrokenPipe` 一个：`Interrupted`（EINTR）到不了这里——
+    // `write_all` 与 `BufWriter::flush_buf` 都在内部重试它，不会往上冒。
+    // 别为了「看起来周全」把它也加进来，那是一条永不执行的分支。
     kind != std::io::ErrorKind::BrokenPipe
 }
 
@@ -419,19 +435,22 @@ fn search_all(args: &Args, out: &mut impl Write) -> (u8, Option<std::io::Error>)
         // Windows 上写的中文文本带 BOM 是常态，正是本工具的目标语料。
         let text = content.strip_prefix('\u{feff}').unwrap_or(&content);
 
-        let matches = find42_core::search(&exp, text);
-        if matches.is_empty() {
-            continue;
-        }
-        found = true;
-
         // 含 NUL 的按二进制处理：只报一行，不打印内容（与 `rg` 同，`--text` 可关）。
         //
         // ⚠️ 这条是**输出整行**新引入的暴露面。改之前打印的是查询词展开后匹配到的片段，
         // 字符集受用户自己敲的东西约束；改成整行之后，被搜文件里**任意**字节都出得来——
         // 包括 OSC 序列 `\x1b]0;…\a`（改终端标题）与 `\x1b]52;c;<base64>\a`（**写剪贴板**）。
         // 对一个「在别人的语料上跑检索」的工具，那是一条从被搜文件到终端状态的注入路径。
+        //
+        // ⚠️ **NUL 是部分防线，不是完整防线**：不含 NUL 的 ANSI/OSC 照样会原样输出。
+        // 这里对齐的是 `rg` 的判据，不是「控制字节一律不出」——别把这段注释读成后者。
         if !args.text && text.contains('\0') {
+            // 只问「有没有」，不物化命中——一个 200 MB 的单行文件能产出两亿个 `Match`，
+            // 为了打印一句话把它们全建出来就是白白 OOM（GPT 系评审的 P2）。
+            if !find42_core::has_match(&exp, text) {
+                continue;
+            }
+            found = true;
             if let Err(e) = writeln!(
                 out,
                 "{}: 二进制文件有命中（含 NUL 字节，用 --text 照搜）",
@@ -443,7 +462,7 @@ fn search_all(args: &Args, out: &mut impl Write) -> (u8, Option<std::io::Error>)
             continue;
         }
 
-        if let Err(e) = emit(out, file, args, &matches) {
+        if let Err(e) = emit(out, file, args, find42_core::search(&exp, text), &mut found) {
             // 下游已经走了，后面的文件不必再读
             write_err = Some(e);
             break;
@@ -532,8 +551,20 @@ mod output_tests {
         }
     }
 
-    fn hits<'a>(text: &'a str, q: &str) -> Vec<find42_core::Match<'a>> {
-        find42_core::search(&find42_core::expand(q), text)
+    /// 跑一次 `emit`，返回（输出, 是否看到命中）。
+    fn run(text: &str, q: &str, args: &Args) -> (String, bool) {
+        let exp = find42_core::expand(q);
+        let mut buf = Vec::new();
+        let mut found = false;
+        emit(
+            &mut buf,
+            Path::new("a.md"),
+            args,
+            find42_core::search(&exp, text),
+            &mut found,
+        )
+        .expect("写进内存不会失败");
+        (String::from_utf8(buf).expect("输出是 UTF-8"), found)
     }
 
     /// 只填 `emit` 会看的三个字段；其余给不影响输出的占位值。
@@ -556,17 +587,10 @@ mod output_tests {
     #[test]
     fn 默认输出整行且同一行只报一次() {
         let text = "先归一再检索，还是先检索再归一。\n无关的一行\n";
-        let mut buf = Vec::new();
-        emit(
-            &mut buf,
-            Path::new("a.md"),
-            &opts(false, 0),
-            &hits(text, "检索"),
-        )
-        .expect("写进内存不会失败");
+        let (out, found) = run(text, "检索", &opts(false, 0));
+        assert!(found);
         assert_eq!(
-            String::from_utf8(buf).expect("输出是 UTF-8"),
-            "a.md:1:先归一再检索，还是先检索再归一。\n",
+            out, "a.md:1:先归一再检索，还是先检索再归一。\n",
             "同一行两处命中，原先输出两行**逐字节相同**的结果"
         );
     }
@@ -578,15 +602,7 @@ mod output_tests {
     #[test]
     fn column_模式逐命中且整行照给() {
         let text = "先归一再检索，还是先检索再归一。";
-        let mut buf = Vec::new();
-        emit(
-            &mut buf,
-            Path::new("a.md"),
-            &opts(true, 0),
-            &hits(text, "检索"),
-        )
-        .expect("写进内存不会失败");
-        let out = String::from_utf8(buf).expect("输出是 UTF-8");
+        let out = run(text, "检索", &opts(true, 0)).0;
         let lines: Vec<&str> = out.lines().collect();
         assert_eq!(lines.len(), 2, "两处命中必须能区分：{out}");
         assert_eq!(lines[0], format!("a.md:1:13:{text}"));
@@ -600,10 +616,18 @@ mod output_tests {
     #[test]
     fn 去重不跨文件串场() {
         let text = "检索一次\n";
+        let exp = find42_core::expand("检索");
         let mut buf = Vec::new();
+        let mut found = false;
         for f in ["a.md", "b.md"] {
-            emit(&mut buf, Path::new(f), &opts(false, 0), &hits(text, "检索"))
-                .expect("写进内存不会失败");
+            emit(
+                &mut buf,
+                Path::new(f),
+                &opts(false, 0),
+                find42_core::search(&exp, text),
+                &mut found,
+            )
+            .expect("写进内存不会失败");
         }
         assert_eq!(
             String::from_utf8(buf).expect("输出是 UTF-8"),
@@ -619,14 +643,21 @@ mod output_tests {
             std::io::ErrorKind::BrokenPipe,
             std::io::ErrorKind::PermissionDenied,
         ] {
+            let exp = find42_core::expand("检索");
+            let mut found = false;
             let e = emit(
                 &mut FailingWriter(kind),
                 Path::new("a.md"),
                 &opts(false, 0),
-                &hits(text, "检索"),
+                find42_core::search(&exp, text),
+                &mut found,
             )
             .expect_err("写失败必须返回 Err，而不是 panic");
             assert_eq!(e.kind(), kind);
+            assert!(
+                found,
+                "★ 写失败也不能把「已经看到过命中」这个事实丢掉——否则退出码会从 0 掉成 1"
+            );
         }
     }
 
@@ -638,17 +669,7 @@ mod output_tests {
     #[test]
     fn column_下不截断则输出量随行长呈平方() {
         let line = "检索".repeat(200); // 1200 字节、200 处命中
-        let n = |cap| {
-            let mut buf = Vec::new();
-            emit(
-                &mut buf,
-                Path::new("a"),
-                &opts(true, cap),
-                &hits(&line, "检索"),
-            )
-            .expect("写进内存不会失败");
-            buf.len()
-        };
+        let n = |cap| run(&line, "检索", &opts(true, cap)).0.len();
         let unbounded = n(0);
         let capped = n(512);
         assert!(
@@ -666,17 +687,10 @@ mod output_tests {
     #[test]
     fn 截断切在字符边界且带标注() {
         let line = "检索".repeat(10); // 60 字节
-        let mut buf = Vec::new();
-        emit(
-            &mut buf,
-            Path::new("a"),
-            &opts(false, 7), // 7 不是 3 的倍数，必然要往回退
-            &hits(&line, "检索"),
-        )
-        .expect("写进内存不会失败");
-        let out = String::from_utf8(buf).expect("截断后仍是合法 UTF-8");
+        // 7 不是 3 的倍数，必然要往回退
+        let out = run(&line, "检索", &opts(false, 7)).0;
         assert!(out.contains("… [整行 60 字节，已截断至 7]"), "{out}");
-        assert!(out.starts_with("a:1:检索"), "6 字节处退到边界：{out}");
+        assert!(out.starts_with("a.md:1:检索"), "6 字节处退到边界：{out}");
     }
 
     /// `clip` 的边界：不截、正好、要回退、上限 0（不限）、上限小于一个字符。

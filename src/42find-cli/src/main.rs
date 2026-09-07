@@ -41,7 +41,9 @@ const HELP: &str = "\
     带  --column：**每处命中输出一行**，由字节列区分同一行上的多处命中
 
     ⚠️ 整行默认截到 512 字节，截断处标注 `… [整行 N 字节，已截断至 M]`
-    ——**这个标注是本工具自己的，不是 rg 的格式**（rg 的 `-M` 是整行换成一句话）。`--column` 下每处命中各写一遍整行，而同一行的命中数
+    ——**这个标注是本工具自己的，不是 rg 的格式**（rg 的 `-M` 是整行换成一句话）。
+    ⚠️ **截断取的是行首，所以命中若在上限之后，预览里看不到它**（`rg -M` 与
+    `--max-columns-preview` 同样如此）。这类行本来也不是给人读的；真要看用 `--max-columns 0`。`--column` 下每处命中各写一遍整行，而同一行的命中数
     正比于行长——不截的话输出量对行长呈**平方**：一个 10 KB 的单行文件（minified
     js/json、单行 csv、老 Mac 的 CR 换行文本都是「一行」）查一个常见字，
     输出就是 106 MB。要原样整行用 `--max-columns 0`。
@@ -319,10 +321,14 @@ fn write_hit(
         write!(out, "{}:{}:{}", name, m.line(), shown)?;
     }
     if clipped {
+        // ⚠️ 报 `shown.len()` 而**不是** `max_columns`：`clip` 会往回退到字符边界，
+        // 实际打出去的字节数多半小于上限。中文三字节一个字，512 的上限实际是 510——
+        // 标注若报上限，就是在报一个没发生过的数。
         write!(
             out,
-            "… [整行 {} 字节，已截断至 {max_columns}]",
-            m.line_text().len()
+            "… [整行 {} 字节，已截断至 {}]",
+            m.line_text().len(),
+            shown.len()
         )?;
     }
     out.write_all(b"\n")
@@ -500,11 +506,7 @@ fn main() -> ExitCode {
     //
     // 非终端时 64 KiB 而不是默认 8 KiB：块越小内层 `LineWriter` 被唤醒得越频繁，
     // 每次都要扫块尾找换行。清理评审实测（4.6 MB 输出）8K → 1.54 ms，64K → 0.40 ms，之后走平。
-    let cap = if std::io::stdout().is_terminal() {
-        0
-    } else {
-        64 * 1024
-    };
+    let cap = if stdout.is_terminal() { 0 } else { 64 * 1024 };
     let mut out = std::io::BufWriter::with_capacity(cap, stdout.lock());
 
     let (normal, write_err) = match &args {
@@ -689,7 +691,10 @@ mod output_tests {
         let line = "检索".repeat(10); // 60 字节
         // 7 不是 3 的倍数，必然要往回退
         let out = run(&line, "检索", &opts(false, 7)).0;
-        assert!(out.contains("… [整行 60 字节，已截断至 7]"), "{out}");
+        assert!(
+            out.contains("… [整行 60 字节，已截断至 6]"),
+            "标注要报**实际打出去的**字节数（回退到边界后是 6，不是上限 7）：{out}"
+        );
         assert!(out.starts_with("a.md:1:检索"), "6 字节处退到边界：{out}");
     }
 

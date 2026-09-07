@@ -24,3 +24,13 @@ warnings = "deny"
 
 [workspace.lints.clippy]
 all = { level = "deny", priority = -1 }
+
+# ⚠️ 这两条不在 `all` 里（属 restriction 组），要显式点名。
+# issue #7：`println!` 遇写失败**直接 panic** 退 101，`| head` 一接就炸；
+# `eprintln!` 同理。改完之后全仓一处都不许再有——但「改完之后」是个人判的事，
+# 会随下一次手写复发。放在这里它就成了**编译期规则**，跑在已有的
+# `cargo clippy --all-targets` 那道闸里，不用新增脚本、也不用记得跑。
+# 输出一律走 `42find-cli` 的 `emit`（写失败经 `is_fatal_write_err` 定退出码）
+# 与 `warn!` 宏（诊断，忽略写失败）。
+print_stdout = "deny"
+print_stderr = "deny"

@@ -122,7 +122,37 @@ mod tests {
     fn 簡繁互查() {
         let hits = search(&expand("检索"), "繁體寫法：檢索、歸一。");
         assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].text, "檢索", "命中的是原文的写法，不是归一形");
+        assert_eq!(hits[0].text(), "檢索", "命中的是原文的写法，不是归一形");
+    }
+
+    /// ★ 钉子：命中按 (行号, 字节列) **升序**产出。
+    ///
+    /// `42find-cli` 的 `emit` 不带 `--column` 时按行去重，哨兵只跟**上一行**比——
+    /// 靠的就是这条。先前它只是实现细节，保证写在**用它的那一头**（cli 的注释里）：
+    /// 哪天有人为了性能把 core 改成分块扫，同一行又会输出多行逐字节相同的结果，
+    /// 而两边的测试都还是绿的。判据挪回提供它的这一头。
+    #[test]
+    fn 命中按行号与字节列升序产出() {
+        let hits = search(&expand("检索"), "先检索再检索\n无关的一行\n又检索一次");
+        let keys: Vec<(usize, usize)> = hits.iter().map(|m| (m.line, m.col)).collect();
+        assert_eq!(
+            keys,
+            // 「先检索再检索」：先@0 检@3 索@6 再@9 检@12 索@15 —— 故 col 是 4 与 13
+            vec![(1, 4), (1, 13), (3, 4)],
+            "顺序或位置变了：{keys:?}"
+        );
+        let mut sorted = keys.clone();
+        sorted.sort_unstable();
+        assert_eq!(keys, sorted, "必须升序");
+    }
+
+    #[test]
+    fn 命中那一段由col与len定位() {
+        // 只留一个字符串视图之后，`text()` 是现算的——这条守住它算得对。
+        let hits = search(&expand("检索"), "异体字：檢索、歸一。");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].text(), "檢索");
+        assert_eq!(hits[0].len, "檢索".len(), "len 是字节长度，与 col 同单位");
     }
 
     #[test]

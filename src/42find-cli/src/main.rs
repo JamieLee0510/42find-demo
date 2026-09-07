@@ -254,42 +254,57 @@ fn emit(
     column: bool,
     matches: &[find42_core::Match<'_>],
 ) -> std::io::Result<()> {
-    // 0 不是合法行号，拿来当「还没输出过任何一行」的哨兵
-    let mut printed = 0usize;
+    // 路径在整个循环里是常量。`Path::display()` 每次都要走一遍 lossy UTF-8 分块，
+    // 塞进 `writeln!` 就是每行重做一次——清理评审实测 57,400 行时占 4.5 ms，提出来省一半。
+    // `to_string_lossy()` 对非法字节的处理与 `display()` 完全一致（都是 U+FFFD），输出逐字节不变。
+    let name = file.to_string_lossy();
+
+    if column {
+        // 每处命中一行，由字节列区分同一行上的多处。
+        // ⚠️ **这一支不能改成按行去重**：`scripts/bench.sh` 量 42find 走的正是 `--column`，
+        // 34 条黄金查询集的分母就是逐命中数，去重会把召回与精确一起改掉。
+        for m in matches {
+            writeln!(out, "{}:{}:{}:{}", name, m.line, m.col, m.line_text)?;
+        }
+        return Ok(());
+    }
+
+    // 不带 `--column` 就没有能区分同行两处命中的字段，于是原先会输出两行
+    // **逐字节相同**的结果，看着像重复。`rg` 在这个模式下也是一个匹配行一行。
+    //
+    // 哨兵只跟**上一行**比，靠的是 `find42_core::search` 按 (行号, 字节列) 升序产出。
+    // 那条保证写在 core 那头的文档与测试里（`命中按行号与字节列升序产出`）——
+    // 判据住在提供它的一头，不住在用它的一头。
+    let mut printed = 0usize; // 0 不是合法行号，拿来当「还没输出过任何一行」
     for m in matches {
-        if column {
-            writeln!(
-                out,
-                "{}:{}:{}:{}",
-                file.display(),
-                m.line,
-                m.col,
-                m.line_text
-            )?;
-        } else if m.line != printed {
-            // 不带 `--column` 就没有能区分同行两处命中的字段，于是原先会输出两行
-            // **逐字节相同**的结果，看着像重复。`rg` 在这个模式下也是一个匹配行一行。
-            // 命中按行号升序产出（`search` 逐行扫），所以只需跟上一行比。
+        if m.line != printed {
             printed = m.line;
-            writeln!(out, "{}:{}:{}", file.display(), m.line, m.line_text)?;
+            writeln!(out, "{}:{}:{}", name, m.line, m.line_text)?;
         }
     }
     Ok(())
 }
 
-/// 标准输出写失败时的退出码。**一处判据**——帮助文本与命中输出共用这一条。
+/// 哪些写失败**算错**。唯一判据——告警那一侧与退出码那一侧共用这一条。
 ///
 /// - `BrokenPipe`：下游关掉了管道（`| head` / `| less` / `| grep -m1`）。**不算错**，
-///   沿用本来该退的码，与 `rg` 一致。先前用 `println!`，这里是直接 panic 退 101。
-/// - 其余写失败（坏 fd、磁盘满）：**算错，退 2**。不能静默成 0——那正是本项目在
-///   **读**那一侧花力气消灭的「静默假阴性」，不能换到**写**这一侧再犯一遍
-///   （见 `state/memory/20260906-管道退出码.md`）。
+///   停止输出、沿用本来该退的码，与 `rg` 一致。先前用 `println!`，这里是直接 panic 退 101。
+/// - 其余写失败（磁盘满、EIO）：**算错**。不能静默成 0——那正是本项目在**读**那一侧
+///   花力气消灭的「静默假阴性」，不能换到**写**这一侧再犯一遍。
 ///
-/// 返回 `u8` 而不是 `ExitCode`，是为了**能测**：`ExitCode` 既不能比较，也取不回里面的值。
+/// ⚠️ **别把这个条件在调用点再写一遍。** 本仓吃过三次「一个判据住两处、每次只修一半」的亏
+///（见上面 `Origin` 那段注释）。这里第一版就是那个形状：`exit_code` 判一次、
+/// `main` 里决定要不要告警时又原地判了一次——两条清理视角同时点了名。
+fn is_fatal_write_err(kind: std::io::ErrorKind) -> bool {
+    kind != std::io::ErrorKind::BrokenPipe
+}
+
+/// 退出码。返回 `u8` 而不是 `ExitCode`，是为了**能测**：后者既不能比较，也取不回里面的值。
 fn exit_code(normal: u8, write_err: Option<std::io::ErrorKind>) -> u8 {
-    match write_err {
-        Some(k) if k != std::io::ErrorKind::BrokenPipe => 2,
-        _ => normal,
+    if write_err.is_some_and(is_fatal_write_err) {
+        2
+    } else {
+        normal
     }
 }
 
@@ -339,8 +354,7 @@ fn search_all(args: &Args, out: &mut impl Write) -> (u8, Option<std::io::Error>)
 
 fn main() -> ExitCode {
     let args = match parse_args() {
-        Ok(Some(a)) => Some(a),
-        Ok(None) => None, // -h / --help
+        Ok(a) => a, // `None` 是 -h / --help
         Err(e) => {
             warn!("42find: {e}\n\n{HELP}");
             return ExitCode::from(2);
@@ -349,9 +363,11 @@ fn main() -> ExitCode {
 
     // 一个缓冲、一次 flush、一条写失败判据——帮助文本与命中输出走同一条路。
     let stdout = std::io::stdout();
-    let mut out = std::io::BufWriter::new(stdout.lock());
+    // 64 KiB 而不是默认的 8 KiB：`Stdout` 内层本来就是 `LineWriter`，块越小它被唤醒得越频繁，
+    // 每次都要扫块尾找换行。清理评审实测（4.6 MB 输出）8K → 1.54 ms，64K → 0.40 ms，之后走平。
+    let mut out = std::io::BufWriter::with_capacity(64 * 1024, stdout.lock());
 
-    let (normal, mut write_err) = match &args {
+    let (normal, write_err) = match &args {
         // `42find --help | head -1` 一样会断管道，所以帮助文本也不能用 `print!`
         None => (0, out.write_all(HELP.as_bytes()).err()),
         Some(a) => search_all(a, &mut out),
@@ -359,13 +375,11 @@ fn main() -> ExitCode {
 
     // ⚠️ flush **必须显式查**：`BufWriter` 的 `Drop` 会**吞掉** flush 的错误，
     // 于是写失败被静默成退出码 0。全仓先前 0 处 flush，写这一侧的静默假阴性
-    // 就是这么来的（`state/memory/20260906-管道退出码.md`）。
-    if write_err.is_none() {
-        write_err = out.flush().err();
-    }
+    // 就是这么来的（`state/memory/20260907-真实使用是一层独立验证.md`）。
+    let write_err = write_err.or_else(|| out.flush().err());
 
     if let Some(e) = &write_err
-        && e.kind() != std::io::ErrorKind::BrokenPipe
+        && is_fatal_write_err(e.kind())
     {
         warn!("42find: 写标准输出失败：{e}");
     }
@@ -424,6 +438,23 @@ mod output_tests {
         assert_eq!(lines.len(), 2, "两处命中必须能区分：{out}");
         assert_eq!(lines[0], format!("a.md:1:13:{text}"));
         assert_eq!(lines[1], format!("a.md:1:31:{text}"));
+    }
+
+    /// 多个文件各自从头去重——哨兵是 `emit` 的局部变量，不跨文件串场。
+    ///
+    /// 这条挡的是「把 `printed` 提到调用方复用」那种写法：两个文件的第 1 行都有命中时，
+    /// 第二个文件的第 1 行会被当成重复**静默吞掉**，而单文件测试全绿。
+    #[test]
+    fn 去重不跨文件串场() {
+        let text = "检索一次\n";
+        let mut buf = Vec::new();
+        for f in ["a.md", "b.md"] {
+            emit(&mut buf, Path::new(f), false, &hits(text, "检索")).expect("写进内存不会失败");
+        }
+        assert_eq!(
+            String::from_utf8(buf).expect("输出是 UTF-8"),
+            "a.md:1:检索一次\nb.md:1:检索一次\n"
+        );
     }
 
     /// 断管道如实返回，**不 panic**——先前 `println!` 在这里直接崩，退 101。

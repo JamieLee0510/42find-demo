@@ -13,11 +13,16 @@ mod variants;
 mod variants_generated;
 
 pub use expand::{Expansion, expand};
-pub use search::{Match, search, search_line};
+pub use search::{Match, has_match, search, search_line};
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `search` 现在是惰性的，测试里统一收成 `Vec` 再断言。
+    fn hits<'a>(q: &str, text: &'a str) -> Vec<Match<'a>> {
+        search(&expand(q), text).collect()
+    }
 
     fn class_of(q: &str, i: usize) -> Vec<char> {
         expand(q).class(i).expect("位置存在").to_vec()
@@ -120,26 +125,57 @@ mod tests {
 
     #[test]
     fn 簡繁互查() {
-        let hits = search(&expand("检索"), "繁體寫法：檢索、歸一。");
+        let hits = hits("检索", "繁體寫法：檢索、歸一。");
         assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].text, "檢索", "命中的是原文的写法，不是归一形");
+        assert_eq!(hits[0].text(), "檢索", "命中的是原文的写法，不是归一形");
+    }
+
+    /// ★ 钉子：命中按 (行号, 字节列) **升序**产出。
+    ///
+    /// `42find-cli` 的 `emit` 不带 `--column` 时按行去重，哨兵只跟**上一行**比——
+    /// 靠的就是这条。先前它只是实现细节，保证写在**用它的那一头**（cli 的注释里）：
+    /// 哪天有人为了性能把 core 改成分块扫，同一行又会输出多行逐字节相同的结果，
+    /// 而两边的测试都还是绿的。判据挪回提供它的这一头。
+    #[test]
+    fn 命中按行号与字节列升序产出() {
+        let hits = hits("检索", "先检索再检索\n无关的一行\n又检索一次");
+        let keys: Vec<(usize, usize)> = hits.iter().map(|m| (m.line(), m.col())).collect();
+        assert_eq!(
+            keys,
+            // 「先检索再检索」：先@0 检@3 索@6 再@9 检@12 索@15 —— 故 col 是 4 与 13
+            vec![(1, 4), (1, 13), (3, 4)],
+            "顺序或位置变了：{keys:?}"
+        );
+        let mut sorted = keys.clone();
+        sorted.sort_unstable();
+        assert_eq!(keys, sorted, "必须升序");
+    }
+
+    #[test]
+    fn 命中那一段由col与byte_len定位() {
+        // 只留一个字符串视图之后，`text()` 是现算的——这条守住它算得对。
+        let hits = hits("检索", "异体字：檢索、歸一。");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].text(), "檢索");
+        assert_eq!(hits[0].byte_len(), "檢索".len(), "byte_len 与 col 同单位");
     }
 
     #[test]
     fn 字节列与多字节字符() {
         // 「异体字：」= 4 个字符 × 3 字节 = 12，故「户」起于第 13 字节
-        let hits = search(&expand("户"), "异体字：户口");
+        let hits = hits("户", "异体字：户口");
         assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].line, 1);
+        assert_eq!(hits[0].line(), 1);
         assert_eq!(
-            hits[0].col, 13,
+            hits[0].col(),
+            13,
             "col 必须是 1-based 字节列，与 rg --column 同单位"
         );
     }
 
     #[test]
     fn 词夹在句中无空格也能命中() {
-        let hits = search(&expand("检索"), "先归一再检索，还是先检索再归一。");
+        let hits = hits("检索", "先归一再检索，还是先检索再归一。");
         assert_eq!(
             hits.len(),
             2,
@@ -147,10 +183,49 @@ mod tests {
         );
     }
 
+    /// ★ 钉子：CRLF 文件的 `line_text` 必须是**原文的字节**，`\r` 不许被吃掉。
+    ///
+    /// `str::lines()` 会剥掉行尾的 `\r`，于是吐出来的「整行」和文件里的不一样，
+    /// 而 `rg` 是原样保留的（实测 `rg --column -F abc` 给 `1:1:abc\r`）。
+    /// 本层的承诺是「不改语料」——剥掉一个字节也是改。
+    #[test]
+    fn crlf的回车留在整行里() {
+        let hits = hits("abc", "abc\r\ndef\r\n");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].line_text(), "abc\r", "\\r 必须留着，与 rg 同");
+        assert_eq!(hits[0].col(), 1);
+    }
+
+    /// 只按 `\n` 切行：以 `\n` 结尾时多出来的空尾巴产不出命中，行号不受影响。
+    #[test]
+    fn 行尾换行不影响行号与命中数() {
+        assert_eq!(hits("户", "第一行无\n第二行有户\n").len(), 1);
+        assert_eq!(hits("户", "第一行无\n第二行有户").len(), 1);
+        assert_eq!(hits("户", "户\n\n\n")[0].line(), 1);
+        assert!(hits("户", "").is_empty());
+    }
+
+    /// `has_match` 与 `search` 同源：有没有命中的答案必须一致，且它不物化任何东西。
+    #[test]
+    fn has_match与search一致() {
+        for (q, t) in [
+            ("检索", "先检索"),
+            ("检索", "无关"),
+            ("户", ""),
+            ("", "任意"),
+        ] {
+            assert_eq!(
+                has_match(&expand(q), t),
+                !hits(q, t).is_empty(),
+                "查「{q}」于「{t}」"
+            );
+        }
+    }
+
     #[test]
     fn 多行报出正确行号() {
-        let hits = search(&expand("户"), "第一行无\n第二行有户");
+        let hits = hits("户", "第一行无\n第二行有户");
         assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].line, 2);
+        assert_eq!(hits[0].line(), 2);
     }
 }

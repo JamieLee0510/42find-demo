@@ -3,14 +3,23 @@
 use crate::expand::Expansion;
 
 /// 一处命中。`col` 是 **1-based 字节列**，与 `rg --column` 同单位。
+///
+/// 借用被扫的那段文本，不复制——查「的」在本仓上有两千余处命中，
+/// 逐处克隆一份整行是纯浪费。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Match {
+pub struct Match<'a> {
     /// 1-based 行号。
     pub line: usize,
     /// 1-based 字节列。
     pub col: usize,
     /// 原文里实际命中的那一段（不是归一形）。
-    pub text: String,
+    pub text: &'a str,
+    /// 命中所在的**整行**（不含行尾换行）。
+    ///
+    /// 光给 `text` 等于「只把你自己敲的那个词还给你」——得再打开文件才知道
+    /// 那句话在说什么。输出层要的是 `rg` 那种 `路径:行号:整行`，
+    /// 而整行只有扫描时手里有，事后由行号回查等于把文本再读一遍。
+    pub line_text: &'a str,
 }
 
 /// 从 `line` 的字节位置 `start` 起能否完整匹配；能则返回结束字节位置。
@@ -29,7 +38,7 @@ fn match_at(exp: &Expansion, line: &str, start: usize) -> Option<usize> {
 
 /// 扫一行。允许重叠命中（与 `vault/truth/queries.tsv` 的计数口径一致）。
 #[must_use]
-pub fn search_line(exp: &Expansion, lineno: usize, line: &str) -> Vec<Match> {
+pub fn search_line<'a>(exp: &Expansion, lineno: usize, line: &'a str) -> Vec<Match<'a>> {
     if exp.is_empty() {
         return Vec::new();
     }
@@ -38,7 +47,8 @@ pub fn search_line(exp: &Expansion, lineno: usize, line: &str) -> Vec<Match> {
             match_at(exp, line, i).map(|end| Match {
                 line: lineno,
                 col: i + 1,
-                text: line[i..end].to_owned(),
+                text: &line[i..end],
+                line_text: line,
             })
         })
         .collect()
@@ -46,7 +56,7 @@ pub fn search_line(exp: &Expansion, lineno: usize, line: &str) -> Vec<Match> {
 
 /// 扫整段文本。
 #[must_use]
-pub fn search(exp: &Expansion, text: &str) -> Vec<Match> {
+pub fn search<'a>(exp: &Expansion, text: &'a str) -> Vec<Match<'a>> {
     text.lines()
         .enumerate()
         .flat_map(|(i, line)| search_line(exp, i + 1, line))

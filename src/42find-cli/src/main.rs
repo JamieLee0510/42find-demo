@@ -1,6 +1,6 @@
 //! 42find 命令行入口：参数解析、遍历、输出格式、退出码。**不放检索逻辑**（见 `.42cog/cog.md`）。
 
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -22,9 +22,12 @@ const HELP: &str = "\
     42find [选项] -- <查询词> [路径...]
 
 选项：
-    --column        输出里带上 1-based 字节列（与 rg --column 同单位）
-    --glob <模式>   只搜匹配的文件，支持 `*.后缀` 或精确文件名
-    -h, --help      显示本帮助
+    --column            输出里带上 1-based 字节列（与 rg --column 同单位）
+    --glob <模式>       只搜匹配的文件，支持 `*.后缀` 或精确文件名
+    -M, --max-columns <N>
+                        整行超过 N 字节就截断并标注（默认 512，`0` 表示不截）
+    -a, --text          把含 NUL 字节的文件也当文本搜（默认只报「二进制文件有命中」）
+    -h, --help          显示本帮助
 
 行为：
     查询词逐字展开成等价写法再扫原文——**不改语料**，所以命中的行列
@@ -37,21 +40,48 @@ const HELP: &str = "\
     不带 --column：**一个匹配行只输出一行**（同行多处命中不重复报）
     带  --column：**每处命中输出一行**，由字节列区分同一行上的多处命中
 
+    ⚠️ 整行默认截到 512 字节。`--column` 下每处命中各写一遍整行，而同一行的命中数
+    正比于行长——不截的话输出量对行长呈**平方**：一个 10 KB 的单行文件（minified
+    js/json、单行 csv、老 Mac 的 CR 换行文本都是「一行」）查一个常见字，
+    输出就是 106 MB。要原样整行用 `--max-columns 0`。
+
+    含 NUL 字节的文件默认只报一行「二进制文件有命中」、不打印内容（与 rg 同）。
+    整行输出会把被搜文件里的 ANSI / OSC 控制字节原样送进终端，而 OSC 序列能改
+    终端标题、甚至写剪贴板。要照搜用 `--text`。
+
+    文件开头的 UTF-8 BOM 会被剥掉再扫（与 rg 同），否则第一行的字节列会恒偏 3。
+
 退出码：
     0 有命中 · 1 无命中 · 2 参数错误，或给定路径读不了／不是常规文件
     （空查询词是参数错误，不当作「匹配所有行」）
     （单个文件**不是 UTF-8** —— 跳过，不算错；**权限拒绝或 IO 错误** —— 报到 stderr 并退 2）
-    （下游关掉管道，如 `| head` —— 停止输出，仍退 0 / 1，不 panic；与 rg 一致）
-    （标准输出真的写失败，如坏 fd 或磁盘满 —— 报到 stderr 并退 2，不静默成 0）
+    （下游关掉管道，如 `| head` —— **立即停止**，仍退 0 / 1，不 panic；与 rg 一致。
+      注意：就此停下之后，尚未检查的文件不再计入退出码）
+    （标准输出真的写失败，如磁盘满或 EIO —— 报到 stderr 并退 2，不静默成 0。
+      ⚠️ 关掉 fd 1 不属此列：Rust 启动时会把已关闭的 0/1/2 补成 /dev/null，写不会失败。
+      磁盘／配额写满也不属此列：SIGXFSZ 在 write 返回之前就把进程打死了，退 153）
 
 遍历：
     递归时只收常规文件、不跟随符号链接（与 rg 默认一致）——FIFO / socket / 设备节点
     会让读取永久阻塞。命令行上显式给出的路径仍然跟随。
 ";
 
+/// 整行输出的默认字节上限。
+///
+/// 为什么必须有个默认、而不是像 `rg -M` 那样默认不限：`rg` **没有**「逐命中 × 整行」
+/// 这个组合（`rg -o` 只给片段、`rg` 不带 `-o` 一个匹配行只给一行），所以它不限也不会炸。
+/// 我们两者兼有，输出量就成了 O(行长²)——实测 10 KB 单行文件查一个常见字，
+/// `--column` 输出 **106 MB**（默认模式与 rg 都是 10 KB）。
+/// 512 字节 ≈ 170 个汉字，比这更长的行本来也不是给人读的。
+const DEFAULT_MAX_COLUMNS: usize = 512;
+
 struct Args {
     column: bool,
     glob: Option<String>,
+    /// 整行输出的字节上限，`0` 表示不截。
+    max_columns: usize,
+    /// 含 NUL 字节的文件也当文本搜。
+    text: bool,
     query: String,
     paths: Vec<PathBuf>,
 }
@@ -59,6 +89,8 @@ struct Args {
 fn parse_args() -> Result<Option<Args>, String> {
     let mut column = false;
     let mut glob = None;
+    let mut max_columns = DEFAULT_MAX_COLUMNS;
+    let mut text = false;
     let mut rest: Vec<std::ffi::OsString> = Vec::new();
     let mut only_positional = false;
 
@@ -88,6 +120,14 @@ fn parse_args() -> Result<Option<Args>, String> {
                     format!("--glob 的模式不是合法 UTF-8：{}", b.to_string_lossy())
                 })?);
             }
+            Some("-M" | "--max-columns") => {
+                let v = it.next().ok_or("--max-columns 后面要跟一个字节数")?;
+                let v = v.to_str().ok_or("--max-columns 的值不是合法 UTF-8")?;
+                max_columns = v
+                    .parse()
+                    .map_err(|_| format!("--max-columns 要一个非负整数，收到：{v}"))?;
+            }
+            Some("-a" | "--text") => text = true,
             Some("--") => only_positional = true,
             Some(o) if o.starts_with('-') => return Err(format!("不认识的选项：{o}")),
             // 非 UTF-8 但以 `-` 开头：仍然是选项写错了，别当路径
@@ -119,6 +159,8 @@ fn parse_args() -> Result<Option<Args>, String> {
     Ok(Some(Args {
         column,
         glob,
+        max_columns,
+        text,
         query,
         paths,
     }))
@@ -241,6 +283,45 @@ fn walk(dir: &Path, glob: Option<&str>, out: &mut Vec<PathBuf>) -> bool {
     ok
 }
 
+/// 按 `--max-columns` 把整行截到字节上限。返回（要打印的那一段, 是否截断了）。
+///
+/// **必须切在字符边界上**——切进多字节字符中间会产出非法 UTF-8，
+/// 而这个工具的语料按定义就是中文，每个字三字节，切中的概率是三分之二。
+fn clip(line: &str, cap: usize) -> (&str, bool) {
+    if cap == 0 || line.len() <= cap {
+        return (line, false);
+    }
+    let mut end = cap;
+    while end > 0 && !line.is_char_boundary(end) {
+        end -= 1;
+    }
+    (&line[..end], true)
+}
+
+/// 写一处命中。**输出格式只在这里定义一次**，两种模式共用。
+fn write_hit(
+    out: &mut impl Write,
+    name: &str,
+    m: &find42_core::Match<'_>,
+    column: bool,
+    max_columns: usize,
+) -> std::io::Result<()> {
+    let (shown, clipped) = clip(m.line_text(), max_columns);
+    if column {
+        write!(out, "{}:{}:{}:{}", name, m.line(), m.col(), shown)?;
+    } else {
+        write!(out, "{}:{}:{}", name, m.line(), shown)?;
+    }
+    if clipped {
+        write!(
+            out,
+            "… [整行 {} 字节，已截断至 {max_columns}]",
+            m.line_text().len()
+        )?;
+    }
+    out.write_all(b"\n")
+}
+
 /// 把一个文件的命中写出去。
 ///
 /// **不用 `println!`**——它遇到写失败**直接 panic**（退 101），而 `| head`、`| less`、
@@ -251,20 +332,20 @@ fn walk(dir: &Path, glob: Option<&str>, out: &mut Vec<PathBuf>) -> bool {
 fn emit(
     out: &mut impl Write,
     file: &Path,
-    column: bool,
+    args: &Args,
     matches: &[find42_core::Match<'_>],
 ) -> std::io::Result<()> {
     // 路径在整个循环里是常量。`Path::display()` 每次都要走一遍 lossy UTF-8 分块，
-    // 塞进 `writeln!` 就是每行重做一次——清理评审实测 57,400 行时占 4.5 ms，提出来省一半。
+    // 塞进 `write!` 就是每行重做一次——清理评审实测 57,400 行时占 4.5 ms，提出来省一半。
     // `to_string_lossy()` 对非法字节的处理与 `display()` 完全一致（都是 U+FFFD），输出逐字节不变。
     let name = file.to_string_lossy();
 
-    if column {
+    if args.column {
         // 每处命中一行，由字节列区分同一行上的多处。
         // ⚠️ **这一支不能改成按行去重**：`scripts/bench.sh` 量 42find 走的正是 `--column`，
         // 34 条黄金查询集的分母就是逐命中数，去重会把召回与精确一起改掉。
         for m in matches {
-            writeln!(out, "{}:{}:{}:{}", name, m.line, m.col, m.line_text)?;
+            write_hit(out, &name, m, true, args.max_columns)?;
         }
         return Ok(());
     }
@@ -277,9 +358,9 @@ fn emit(
     // 判据住在提供它的一头，不住在用它的一头。
     let mut printed = 0usize; // 0 不是合法行号，拿来当「还没输出过任何一行」
     for m in matches {
-        if m.line != printed {
-            printed = m.line;
-            writeln!(out, "{}:{}:{}", name, m.line, m.line_text)?;
+        if m.line() != printed {
+            printed = m.line();
+            write_hit(out, &name, m, false, args.max_columns)?;
         }
     }
     Ok(())
@@ -323,7 +404,7 @@ fn search_all(args: &Args, out: &mut impl Write) -> (u8, Option<std::io::Error>)
         // 非 UTF-8 → 跳过（不算错）；权限拒绝 / IO 错误 → 报出来并计入退出码 2。
         // 两者原先走同一条 `continue`，于是 mode-000 的文件被静默当成「无命中」——
         // 零 stderr、退出码 1，是**静默假阴性**。rg 在这种情况下报 Permission denied 并退 2。
-        let text = match std::fs::read_to_string(file) {
+        let content = match std::fs::read_to_string(file) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::InvalidData => continue,
             Err(e) => {
@@ -332,9 +413,37 @@ fn search_all(args: &Args, out: &mut impl Write) -> (u8, Option<std::io::Error>)
                 continue;
             }
         };
-        let matches = find42_core::search(&exp, &text);
-        found |= !matches.is_empty();
-        if let Err(e) = emit(out, file, args.column, &matches) {
+
+        // 剥掉文件开头的 UTF-8 BOM 再扫（与 `rg` 同）。不剥的话第一行的字节列恒偏 3,
+        // 而「`--column` 与 `rg --column` 同单位」是钉死的硬约束；BOM 还会随整行进 stdout。
+        // Windows 上写的中文文本带 BOM 是常态，正是本工具的目标语料。
+        let text = content.strip_prefix('\u{feff}').unwrap_or(&content);
+
+        let matches = find42_core::search(&exp, text);
+        if matches.is_empty() {
+            continue;
+        }
+        found = true;
+
+        // 含 NUL 的按二进制处理：只报一行，不打印内容（与 `rg` 同，`--text` 可关）。
+        //
+        // ⚠️ 这条是**输出整行**新引入的暴露面。改之前打印的是查询词展开后匹配到的片段，
+        // 字符集受用户自己敲的东西约束；改成整行之后，被搜文件里**任意**字节都出得来——
+        // 包括 OSC 序列 `\x1b]0;…\a`（改终端标题）与 `\x1b]52;c;<base64>\a`（**写剪贴板**）。
+        // 对一个「在别人的语料上跑检索」的工具，那是一条从被搜文件到终端状态的注入路径。
+        if !args.text && text.contains('\0') {
+            if let Err(e) = writeln!(
+                out,
+                "{}: 二进制文件有命中（含 NUL 字节，用 --text 照搜）",
+                file.display()
+            ) {
+                write_err = Some(e);
+                break;
+            }
+            continue;
+        }
+
+        if let Err(e) = emit(out, file, args, &matches) {
             // 下游已经走了，后面的文件不必再读
             write_err = Some(e);
             break;
@@ -363,9 +472,21 @@ fn main() -> ExitCode {
 
     // 一个缓冲、一次 flush、一条写失败判据——帮助文本与命中输出走同一条路。
     let stdout = std::io::stdout();
-    // 64 KiB 而不是默认的 8 KiB：`Stdout` 内层本来就是 `LineWriter`，块越小它被唤醒得越频繁，
+    // **终端上不缓冲，管道/文件上用 64 KiB 大块。** 与 `rg` 同策略。
+    //
+    // 容量 0 时 `BufWriter` 是直通的（每次写都 `buf.len() >= capacity`，直接交给内层），
+    // 于是又落回 `Stdout` 自己的 `LineWriter`——逐行出。这样搜大目录时第一条命中立刻可见，
+    // Ctrl-C 也不会把攒着的那一批算好的命中丢掉（信号终止不跑 destructor）。
+    // 用容量 0 而不是分两条 `Box<dyn Write>` 分支，是为了**只有一个类型、一条 flush 判据**。
+    //
+    // 非终端时 64 KiB 而不是默认 8 KiB：块越小内层 `LineWriter` 被唤醒得越频繁，
     // 每次都要扫块尾找换行。清理评审实测（4.6 MB 输出）8K → 1.54 ms，64K → 0.40 ms，之后走平。
-    let mut out = std::io::BufWriter::with_capacity(64 * 1024, stdout.lock());
+    let cap = if std::io::stdout().is_terminal() {
+        0
+    } else {
+        64 * 1024
+    };
+    let mut out = std::io::BufWriter::with_capacity(cap, stdout.lock());
 
     let (normal, write_err) = match &args {
         // `42find --help | head -1` 一样会断管道，所以帮助文本也不能用 `print!`
@@ -376,7 +497,15 @@ fn main() -> ExitCode {
     // ⚠️ flush **必须显式查**：`BufWriter` 的 `Drop` 会**吞掉** flush 的错误，
     // 于是写失败被静默成退出码 0。全仓先前 0 处 flush，写这一侧的静默假阴性
     // 就是这么来的（`state/memory/20260907-真实使用是一层独立验证.md`）。
-    let write_err = write_err.or_else(|| out.flush().err());
+    // ⚠️ **无条件 flush，别写成 `write_err.or_else(|| out.flush().err())`。**
+    // 那样只要前面报过一次错就不跑显式 flush，剩下的缓冲交给 `BufWriter::Drop` 去写——
+    // 而 `Drop` 吞掉 flush 错误，正是这段代码上面刚点名批判的事。
+    // 两个错都在时按**致命优先**合并：断管道之后真出了 EIO，不该被那个不算错的 EPIPE 盖住。
+    let flush_err = out.flush().err();
+    let write_err = match (write_err, flush_err) {
+        (Some(a), Some(b)) => Some(if is_fatal_write_err(a.kind()) { a } else { b }),
+        (a, b) => a.or(b),
+    };
 
     if let Some(e) = &write_err
         && is_fatal_write_err(e.kind())
@@ -407,6 +536,18 @@ mod output_tests {
         find42_core::search(&find42_core::expand(q), text)
     }
 
+    /// 只填 `emit` 会看的三个字段；其余给不影响输出的占位值。
+    fn opts(column: bool, max_columns: usize) -> Args {
+        Args {
+            column,
+            glob: None,
+            max_columns,
+            text: false,
+            query: "检索".to_owned(),
+            paths: Vec::new(),
+        }
+    }
+
     /// ★ 钉子：输出必须是**整行**，不是「把你自己敲的那个词还给你」。
     ///
     /// 这条是 issue #7 的第一症状：`.../01-research.md:1:判据` 得再打开文件才读得懂，
@@ -416,7 +557,13 @@ mod output_tests {
     fn 默认输出整行且同一行只报一次() {
         let text = "先归一再检索，还是先检索再归一。\n无关的一行\n";
         let mut buf = Vec::new();
-        emit(&mut buf, Path::new("a.md"), false, &hits(text, "检索")).expect("写进内存不会失败");
+        emit(
+            &mut buf,
+            Path::new("a.md"),
+            &opts(false, 0),
+            &hits(text, "检索"),
+        )
+        .expect("写进内存不会失败");
         assert_eq!(
             String::from_utf8(buf).expect("输出是 UTF-8"),
             "a.md:1:先归一再检索，还是先检索再归一。\n",
@@ -432,7 +579,13 @@ mod output_tests {
     fn column_模式逐命中且整行照给() {
         let text = "先归一再检索，还是先检索再归一。";
         let mut buf = Vec::new();
-        emit(&mut buf, Path::new("a.md"), true, &hits(text, "检索")).expect("写进内存不会失败");
+        emit(
+            &mut buf,
+            Path::new("a.md"),
+            &opts(true, 0),
+            &hits(text, "检索"),
+        )
+        .expect("写进内存不会失败");
         let out = String::from_utf8(buf).expect("输出是 UTF-8");
         let lines: Vec<&str> = out.lines().collect();
         assert_eq!(lines.len(), 2, "两处命中必须能区分：{out}");
@@ -449,7 +602,8 @@ mod output_tests {
         let text = "检索一次\n";
         let mut buf = Vec::new();
         for f in ["a.md", "b.md"] {
-            emit(&mut buf, Path::new(f), false, &hits(text, "检索")).expect("写进内存不会失败");
+            emit(&mut buf, Path::new(f), &opts(false, 0), &hits(text, "检索"))
+                .expect("写进内存不会失败");
         }
         assert_eq!(
             String::from_utf8(buf).expect("输出是 UTF-8"),
@@ -468,12 +622,72 @@ mod output_tests {
             let e = emit(
                 &mut FailingWriter(kind),
                 Path::new("a.md"),
-                false,
+                &opts(false, 0),
                 &hits(text, "检索"),
             )
             .expect_err("写失败必须返回 Err，而不是 panic");
             assert_eq!(e.kind(), kind);
         }
+    }
+
+    /// ★ 钉子：`--column` 下不截断，输出量对行长呈**平方**。
+    ///
+    /// 这是 pr-ready 三个视角同时抓到的 P0：每处命中各写一遍整行，而同一行的命中数
+    /// 正比于行长。实测 10 KB 单行文件查一个常见字 → 106 MB（默认模式与 rg 都是 10 KB）。
+    /// 玩具语料整类藏住了它——`vault/truth/corpus` 最长的一行只有 78 字节。
+    #[test]
+    fn column_下不截断则输出量随行长呈平方() {
+        let line = "检索".repeat(200); // 1200 字节、200 处命中
+        let n = |cap| {
+            let mut buf = Vec::new();
+            emit(
+                &mut buf,
+                Path::new("a"),
+                &opts(true, cap),
+                &hits(&line, "检索"),
+            )
+            .expect("写进内存不会失败");
+            buf.len()
+        };
+        let unbounded = n(0);
+        let capped = n(512);
+        assert!(
+            unbounded > 200 * 1200,
+            "不截断时应当是 O(行长²)：{unbounded} 字节"
+        );
+        assert!(
+            capped < unbounded / 2,
+            "上限必须真的把它压下来：{capped} vs {unbounded}"
+        );
+    }
+
+    /// 截断必须切在**字符边界**上——切进多字节字符中间会产出非法 UTF-8。
+    /// 语料按定义是中文，每字三字节，随手切中的概率是三分之二。
+    #[test]
+    fn 截断切在字符边界且带标注() {
+        let line = "检索".repeat(10); // 60 字节
+        let mut buf = Vec::new();
+        emit(
+            &mut buf,
+            Path::new("a"),
+            &opts(false, 7), // 7 不是 3 的倍数，必然要往回退
+            &hits(&line, "检索"),
+        )
+        .expect("写进内存不会失败");
+        let out = String::from_utf8(buf).expect("截断后仍是合法 UTF-8");
+        assert!(out.contains("… [整行 60 字节，已截断至 7]"), "{out}");
+        assert!(out.starts_with("a:1:检索"), "6 字节处退到边界：{out}");
+    }
+
+    /// `clip` 的边界：不截、正好、要回退、上限 0（不限）、上限小于一个字符。
+    #[test]
+    fn clip的边界() {
+        assert_eq!(clip("检索", 0), ("检索", false), "0 表示不截");
+        assert_eq!(clip("检索", 99), ("检索", false), "短于上限不截");
+        assert_eq!(clip("检索", 6), ("检索", false), "正好等于上限不截");
+        assert_eq!(clip("检索", 5), ("检", true), "回退到字符边界");
+        assert_eq!(clip("检索", 1), ("", true), "上限小于一个字符时给空串");
+        assert_eq!(clip("", 5), ("", false));
     }
 
     /// 退出码真值表。断管道沿用原码，其余写失败一律 2。

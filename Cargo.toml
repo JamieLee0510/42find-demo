@@ -34,3 +34,6 @@ all = { level = "deny", priority = -1 }
 # 与 `warn!` 宏（诊断，忽略写失败）。
 print_stdout = "deny"
 print_stderr = "deny"
+# `dbg!` 展开成 `eprintln!`，写失败同样 panic，同属 restriction 组、同样不在 `all` 里
+# ——刚发现这个盲区就只堵两条，第三条会原样再来一次。
+dbg_macro = "deny"

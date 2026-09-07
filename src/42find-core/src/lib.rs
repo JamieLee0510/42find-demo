@@ -134,7 +134,7 @@ mod tests {
     #[test]
     fn 命中按行号与字节列升序产出() {
         let hits = search(&expand("检索"), "先检索再检索\n无关的一行\n又检索一次");
-        let keys: Vec<(usize, usize)> = hits.iter().map(|m| (m.line, m.col)).collect();
+        let keys: Vec<(usize, usize)> = hits.iter().map(|m| (m.line(), m.col())).collect();
         assert_eq!(
             keys,
             // 「先检索再检索」：先@0 检@3 索@6 再@9 检@12 索@15 —— 故 col 是 4 与 13
@@ -147,12 +147,12 @@ mod tests {
     }
 
     #[test]
-    fn 命中那一段由col与len定位() {
+    fn 命中那一段由col与byte_len定位() {
         // 只留一个字符串视图之后，`text()` 是现算的——这条守住它算得对。
         let hits = search(&expand("检索"), "异体字：檢索、歸一。");
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].text(), "檢索");
-        assert_eq!(hits[0].len, "檢索".len(), "len 是字节长度，与 col 同单位");
+        assert_eq!(hits[0].byte_len(), "檢索".len(), "byte_len 与 col 同单位");
     }
 
     #[test]
@@ -160,9 +160,10 @@ mod tests {
         // 「异体字：」= 4 个字符 × 3 字节 = 12，故「户」起于第 13 字节
         let hits = search(&expand("户"), "异体字：户口");
         assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].line, 1);
+        assert_eq!(hits[0].line(), 1);
         assert_eq!(
-            hits[0].col, 13,
+            hits[0].col(),
+            13,
             "col 必须是 1-based 字节列，与 rg --column 同单位"
         );
     }
@@ -181,6 +182,6 @@ mod tests {
     fn 多行报出正确行号() {
         let hits = search(&expand("户"), "第一行无\n第二行有户");
         assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].line, 2);
+        assert_eq!(hits[0].line(), 2);
     }
 }
